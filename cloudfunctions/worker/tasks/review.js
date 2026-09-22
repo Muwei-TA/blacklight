@@ -31,7 +31,7 @@ async function checkText(content, openid) {
     const chunk = chars.slice(offset, offset + 2500).join('');
     let res;
     try {
-      res = await cloud.openapi.security.msgSecCheck({ version: 2, openid, scene: 2, content: chunk });
+      res = await cloud.openapi({ appid: process.env.WX_APPID }).security.msgSecCheck({ version: 2, openid, scene: 2, content: chunk });
     } catch (err) {
       throw new Error(`msgSecCheck failed: ${err.errCode || 'unavailable'}`);
     }
