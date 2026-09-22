@@ -1,7 +1,8 @@
 # 成员治理、申诉与运营熔断集成契约
 
 本分支新增 `cloudfunctions/api/domain/governance.js` 和独立迁移
-`cloudbase/migrations/20260922170000_governance.sql`。主 Agent 集成时把下列
+`cloudbase/migrations/20260922170000_governance.sql`、
+`cloudbase/migrations/20260922190000_invite_creation.sql`。主 Agent 集成时把下列
 action 挂到 `api/index.js`；本分支按要求没有改路由表、常量、session 或 presenters。
 
 ## Action 契约
@@ -15,10 +16,17 @@ action 挂到 `api/index.js`；本分支按要求没有改路由表、常量、s
 | `appeals/mine` | `{ limit? }` | `{ ok, items: AppealDTO[] }` | 仅返回当前作者自己的申诉字段；不返回帖子正文、标题或举报人 |
 | `admin/appeals/list` | `{ limit? }` | `{ ok, items: AppealDTO[] }` | moderator/admin；队列只返回理由、状态、申诉/帖子 ID 与版本 |
 | `admin/appeal/decide` | `{ appealId, expectedVersion, decision, reason }` | `{ ok, appealId, status, postStatus, reviewTaskId?, version }` | moderator/admin；决定理由必填；批准进入带新版本的再次审核；并发版本冲突拒绝 |
+| `admin/members/list` | `{ limit? }` | `{ ok, items: MemberDTO[] }` | 仅 active moderator；不含 openid 或其他用户私密字段 |
+| `admin/invites/create` | `{ maxUses?, ttlSeconds? }` | `{ ok, code, expiresAt, maxUses, usedCount }` | 仅 active moderator；服务端随机生成；TTL 60 秒至 90 天；邀请码不写入日志/审计 |
 
 `AppealDTO` 只包含 `appealId`、`postId`、`contentVersion`、`status`、`reason`、
 `decision`、`decisionReason`、`version`、`createdAt` 和 `updatedAt`。领域层和
 RPC 层都使用字段白名单，避免私密原文或作者身份从管理队列泄露。
+
+`MemberDTO` 只包含 `targetUserId`、`displayName`、`role`、`status`、`mutedUntil` 和
+`version`。邀请码创建在 `hg_create_invite` 的单一 PostgreSQL 事务中完成随机生成、
+TTL/使用次数校验、受限记录和脱敏审计；返回给 moderator 的 code 只在响应中出现，
+代码路径不打印它。
 
 客户端传来的 `targetUserId` 只是被操作对象。审计和 RPC 的 `p_actor_id` 始终来自 `ctx.viewer.userId`；不接受 payload 的 `userId` 作为调用者身份。
 
@@ -57,7 +65,7 @@ npm run lint
 
 主 Agent 还需：
 
-1. 部署 `20260922170000_governance.sql`，回读 `hg_appeals` 表、唯一索引、RPC 权限与函数定义。
+1. 按顺序部署 `20260922170000_governance.sql`、`20260922190000_invite_creation.sql`，回读 `hg_appeals`、邀请码记录、RPC 权限与函数定义。
 2. 将 action 映射到 `api/index.js`，并在前端契约登记。
 3. session 把 `membership.mutedUntil` 注入 `buildViewer`，验证发帖和评论在禁言期间均返回 `forbidden`。
 4. 用两个 moderator 并发移除同一成员、并发提交同一申诉，确认只有一个成功且审计/通知不重复；成员变更在统一 advisory lock 下读取 actor。

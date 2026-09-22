@@ -17,7 +17,14 @@ DECLARE
   task jsonb;
   n integer;
   audit_before integer;
+  moderator_before integer;
 BEGIN
+  SELECT count(*) INTO moderator_before
+  FROM public.hg_memberships
+  WHERE doc->>'clubId' = 'heiguang'
+    AND doc->>'status' = 'active'
+    AND doc->>'role' = 'moderator';
+
   INSERT INTO public.hg_memberships (id, doc) VALUES
     ('membership:' || actor_id, jsonb_build_object(
       '_id', 'membership:' || actor_id, 'userId', actor_id, 'clubId', 'heiguang',
@@ -76,7 +83,7 @@ BEGIN
   SELECT count(*) INTO n
   FROM public.hg_memberships
   WHERE doc->>'clubId' = 'heiguang' AND doc->>'status' = 'active' AND doc->>'role' = 'moderator';
-  IF n <> 1 THEN RAISE EXCEPTION 'moderator count invariant broken'; END IF;
+  IF n <> moderator_before + 1 THEN RAISE EXCEPTION 'moderator count invariant broken'; END IF;
 
   owner_id := 'gov-int-owner';
   attacker_id := 'gov-int-attacker';

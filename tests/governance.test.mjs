@@ -21,6 +21,29 @@ const fakeDb = {
     return {
       async rpc(name, args) {
         calls.push({ name, args });
+        if (name === 'hg_governance_admin' && args.p_action === 'members.list') {
+          return {
+            ok: true,
+            items: [{
+              targetUserId: 'u_target',
+              displayName: '目标成员',
+              role: ROLE.MEMBER,
+              status: MEMBER_STATUS.ACTIVE,
+              mutedUntil: null,
+              version: 2,
+              wxOpenIdRef: 'must-not-cross-dto',
+            }],
+          };
+        }
+        if (name === 'hg_create_invite') {
+          return {
+            ok: true,
+            code: 'AB12CD34EF56',
+            expiresAt: '2026-09-30T00:00:00.000Z',
+            maxUses: args.p_input.maxUses,
+            usedCount: 0,
+          };
+        }
         if (args.p_action === 'appeals.mine' || args.p_action === 'admin.appeals.list') {
           return {
             ok: true,
@@ -164,6 +187,49 @@ test('申诉列表拒绝未授权的访客和普通成员', async () => {
     governance.listAppeals({}, ctx(policies.buildViewer({
       userId: 'u_member', role: ROLE.MEMBER, memberStatus: MEMBER_STATUS.ACTIVE,
     }))),
+    (error) => error.kind === 'forbidden',
+  );
+});
+
+test('成员名册只返回必要 DTO，moderator 才能读取', async () => {
+  calls.length = 0;
+  const result = await governance.listMembers({ limit: 20 }, ctx(moderator));
+  assert.equal(calls[0].name, 'hg_governance_admin');
+  assert.equal(calls[0].args.p_action, 'members.list');
+  assert.deepEqual(result.items[0], {
+    targetUserId: 'u_target',
+    displayName: '目标成员',
+    role: ROLE.MEMBER,
+    status: MEMBER_STATUS.ACTIVE,
+    mutedUntil: null,
+    version: 2,
+  });
+  assert.equal(result.items[0].wxOpenIdRef, undefined);
+
+  await assert.rejects(
+    governance.listMembers({}, ctx(admin)),
+    (error) => error.kind === 'forbidden',
+  );
+});
+
+test('邀请码由服务端生成并限制 maxUses/TTL，admin 不能创建', async () => {
+  calls.length = 0;
+  const result = await governance.createInvite({ maxUses: 3, ttlSeconds: 3600 }, ctx(moderator));
+  assert.equal(calls[0].name, 'hg_create_invite');
+  assert.equal(calls[0].args.p_actor_id, 'u_mod');
+  assert.deepEqual(calls[0].args.p_input, { maxUses: 3, ttlSeconds: 3600 });
+  assert.equal(result.code, 'AB12CD34EF56');
+
+  await assert.rejects(
+    governance.createInvite({ maxUses: 0, ttlSeconds: 3600 }, ctx(moderator)),
+    (error) => error.kind === 'invalid_input',
+  );
+  await assert.rejects(
+    governance.createInvite({ maxUses: 1, ttlSeconds: 30 }, ctx(moderator)),
+    (error) => error.kind === 'invalid_input',
+  );
+  await assert.rejects(
+    governance.createInvite({ maxUses: 1, ttlSeconds: 3600 }, ctx(admin)),
     (error) => error.kind === 'forbidden',
   );
 });
