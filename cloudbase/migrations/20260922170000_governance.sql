@@ -46,12 +46,22 @@ DECLARE
   post_version integer;
   content_version integer;
   moderator_count integer;
+  page_limit integer;
+  review_task_id text;
+  result jsonb;
   now_text text := to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
   audit_id text;
   notification_id text;
 BEGIN
   IF p_actor_id IS NULL OR p_actor_id = '' THEN
     RAISE EXCEPTION 'FORBIDDEN';
+  END IF;
+
+  -- Serialize every membership mutation before reading the actor.  All
+  -- moderators therefore use one lock order when checking the last-moderator
+  -- invariant, avoiding cross-moderator races and lock-order deadlocks.
+  IF p_action LIKE 'member.%' THEN
+    PERFORM pg_advisory_xact_lock(hashtext('hg-governance:heiguang:members'));
   END IF;
 
   SELECT doc INTO actor
@@ -67,6 +77,9 @@ BEGIN
     RAISE EXCEPTION 'FORBIDDEN';
   END IF;
   IF p_action = 'appeal.decide' AND actor->>'role' NOT IN ('moderator', 'admin') THEN
+    RAISE EXCEPTION 'FORBIDDEN';
+  END IF;
+  IF p_action = 'admin.appeals.list' AND actor->>'role' NOT IN ('moderator', 'admin') THEN
     RAISE EXCEPTION 'FORBIDDEN';
   END IF;
 
@@ -101,7 +114,7 @@ BEGIN
       END IF;
     END IF;
 
-    IF p_action = 'member.remove'
+    IF (p_action = 'member.remove' AND target->>'role' = 'moderator')
        OR (p_action = 'member.role' AND target->>'role' = 'moderator' AND new_role <> 'moderator') THEN
       SELECT count(*) INTO moderator_count
       FROM public.hg_memberships
@@ -192,6 +205,9 @@ BEGIN
     IF post_id IS NULL OR owner_id IS NULL OR reason IS NULL OR content_version IS NULL THEN
       RAISE EXCEPTION 'INVALID';
     END IF;
+    IF owner_id <> p_actor_id THEN
+      RAISE EXCEPTION 'NOT_OWNER';
+    END IF;
 
     SELECT doc INTO post FROM public.hg_posts WHERE id = post_id FOR UPDATE;
     IF post IS NULL THEN RAISE EXCEPTION 'NOT_FOUND'; END IF;
@@ -259,8 +275,36 @@ BEGIN
     END IF;
 
     IF decision = 'approve' THEN
-      updated := post || jsonb_build_object('status', 'published', 'reviewedAt', now_text, 'reviewedBy', p_actor_id, 'updatedAt', now_text, 'version', post_version + 1);
+      -- Approving an appeal only re-opens the content for a fresh automated
+      -- safety review. It must not bypass the normal fail-closed review path.
+      updated := post || jsonb_build_object(
+        'status', 'pending',
+        'reviewedAt', NULL,
+        'reviewedBy', NULL,
+        'rejectReason', NULL,
+        'reviewRequestedAt', now_text,
+        'reviewRequestedBy', p_actor_id,
+        'updatedAt', now_text,
+        'version', post_version + 1
+      );
       UPDATE public.hg_posts SET doc = updated WHERE id = post_id;
+
+      review_task_id := 'review:appeal:' || md5(clock_timestamp()::text || random()::text);
+      INSERT INTO public.hg_review_tasks (id, doc) VALUES (
+        review_task_id,
+        jsonb_build_object(
+          '_id', review_task_id,
+          'targetType', 'post',
+          'targetId', post_id,
+          'postVersion', post_version + 1,
+          'status', 'queued',
+          'attempts', 0,
+          'needsMedia', CASE WHEN jsonb_typeof(updated->'assetIds') = 'array' THEN jsonb_array_length(updated->'assetIds') > 0 ELSE false END,
+          'reason', 'appeal_recheck',
+          'createdAt', now_text,
+          'nextAttemptAt', now_text
+        )
+      );
     END IF;
 
     updated := appeal || jsonb_build_object(
@@ -282,9 +326,60 @@ BEGIN
     notification_id := 'notification:' || md5(clock_timestamp()::text || random()::text);
     INSERT INTO public.hg_notifications (id, doc) VALUES (
       notification_id,
-      jsonb_build_object('_id', notification_id, 'recipientId', owner_id, 'eventType', 'system_review', 'title', CASE decision WHEN 'approve' THEN '你的申诉已通过' ELSE '你的申诉未通过' END, 'summary', reason, 'targetType', 'post', 'targetId', post_id, 'icon', CASE decision WHEN 'approve' THEN 'check-circle' ELSE 'error-circle' END, 'createdAt', now_text)
+      jsonb_build_object(
+        '_id', notification_id,
+        'recipientId', owner_id,
+        'eventType', 'system_review',
+        'title', CASE decision WHEN 'approve' THEN '你的申诉已通过，内容进入再次审核' ELSE '你的申诉未通过' END,
+        'summary', reason,
+        'targetType', 'post',
+        'targetId', post_id,
+        'icon', CASE decision WHEN 'approve' THEN 'check-circle' ELSE 'error-circle' END,
+        'createdAt', now_text
+      )
     );
-    RETURN jsonb_build_object('ok', true, 'appealId', appeal_id, 'status', updated->>'status', 'postStatus', CASE decision WHEN 'approve' THEN 'published' ELSE post->>'status' END, 'version', actual_version + 1);
+    RETURN jsonb_build_object(
+      'ok', true,
+      'appealId', appeal_id,
+      'status', updated->>'status',
+      'postStatus', CASE decision WHEN 'approve' THEN 'pending' ELSE post->>'status' END,
+      'reviewTaskId', CASE decision WHEN 'approve' THEN review_task_id ELSE NULL END,
+      'version', actual_version + 1
+    );
+  END IF;
+
+  IF p_action IN ('appeals.mine', 'admin.appeals.list') THEN
+    page_limit := COALESCE(NULLIF(p_input->>'limit', '')::integer, 20);
+    IF page_limit < 1 OR page_limit > 50 THEN
+      RAISE EXCEPTION 'INVALID';
+    END IF;
+
+    SELECT COALESCE(jsonb_agg(item ORDER BY item->>'createdAt' DESC), '[]'::jsonb)
+    INTO result
+    FROM (
+      SELECT jsonb_build_object(
+        'appealId', id,
+        'postId', doc->>'postId',
+        'contentVersion', NULLIF(doc->>'contentVersion', '')::integer,
+        'status', doc->>'status',
+        'reason', doc->>'reason',
+        'decision', doc->>'decision',
+        'decisionReason', doc->>'decisionReason',
+        'version', COALESCE(NULLIF(doc->>'version', '')::integer, 1),
+        'createdAt', doc->>'createdAt',
+        'updatedAt', doc->>'updatedAt'
+      ) AS item
+      FROM public.hg_appeals
+      WHERE (p_action = 'appeals.mine' AND doc->>'ownerId' = p_actor_id)
+         OR p_action = 'admin.appeals.list'
+      ORDER BY doc->>'createdAt' DESC
+      LIMIT page_limit
+    ) rows;
+
+    -- This DTO deliberately excludes post body/title, owner identity and
+    -- reporter data. The admin queue only needs reason, state and the IDs and
+    -- versions required to make a decision.
+    RETURN jsonb_build_object('ok', true, 'items', result);
   END IF;
 
   RAISE EXCEPTION 'INVALID';

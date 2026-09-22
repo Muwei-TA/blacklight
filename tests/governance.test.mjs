@@ -21,6 +21,25 @@ const fakeDb = {
     return {
       async rpc(name, args) {
         calls.push({ name, args });
+        if (args.p_action === 'appeals.mine' || args.p_action === 'admin.appeals.list') {
+          return {
+            ok: true,
+            items: [{
+              appealId: 'appeal-1',
+              postId: 'post-1',
+              contentVersion: 3,
+              status: 'submitted',
+              reason: '请复核',
+              decision: null,
+              decisionReason: null,
+              version: 1,
+              createdAt: '2026-09-22T00:00:00.000Z',
+              updatedAt: '2026-09-22T00:00:00.000Z',
+              body: 'private post body must never cross the DTO boundary',
+              ownerId: 'private-owner-id',
+            }],
+          };
+        }
         return { ok: true };
       },
     };
@@ -106,4 +125,45 @@ test('申诉决定必须是 moderator/admin 且必须有理由', async () => {
   await governance.decideAppeal({ appealId: 'a1', expectedVersion: 1, decision: 'reject', reason: '证据不足' }, ctx(admin));
   assert.equal(calls[0].args.p_action, 'appeal.decide');
   assert.equal(calls[0].args.p_actor_id, 'u_admin');
+});
+
+test('申诉列表只返回授权 DTO，不携带私密正文或 owner 身份', async () => {
+  calls.length = 0;
+  const mine = await governance.listMyAppeals({ limit: 10 }, ctx(policies.buildViewer({
+    userId: 'u_author', role: ROLE.MEMBER, memberStatus: MEMBER_STATUS.ACTIVE,
+  })));
+  assert.equal(calls[0].args.p_action, 'appeals.mine');
+  assert.deepEqual(mine.items[0], {
+    appealId: 'appeal-1',
+    postId: 'post-1',
+    contentVersion: 3,
+    status: 'submitted',
+    reason: '请复核',
+    decision: null,
+    decisionReason: null,
+    version: 1,
+    createdAt: '2026-09-22T00:00:00.000Z',
+    updatedAt: '2026-09-22T00:00:00.000Z',
+  });
+  assert.equal(mine.items[0].body, undefined);
+  assert.equal(mine.items[0].ownerId, undefined);
+
+  calls.length = 0;
+  const queue = await governance.listAppeals({ limit: 10 }, ctx(admin));
+  assert.equal(calls[0].args.p_action, 'admin.appeals.list');
+  assert.equal(queue.items[0].body, undefined);
+  assert.equal(queue.items[0].ownerId, undefined);
+});
+
+test('申诉列表拒绝未授权的访客和普通成员', async () => {
+  await assert.rejects(
+    governance.listMyAppeals({}, ctx(policies.buildViewer({}))),
+    (error) => error.kind === 'unauthenticated',
+  );
+  await assert.rejects(
+    governance.listAppeals({}, ctx(policies.buildViewer({
+      userId: 'u_member', role: ROLE.MEMBER, memberStatus: MEMBER_STATUS.ACTIVE,
+    }))),
+    (error) => error.kind === 'forbidden',
+  );
 });

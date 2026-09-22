@@ -12,7 +12,13 @@ action 挂到 `api/index.js`；本分支按要求没有改路由表、常量、s
 | `admin/member/mute` | `{ targetUserId, expectedVersion, mutedUntil, reason }` | `{ ok, targetUserId, version, mutedUntil }` | `mutedUntil` 为未来 ISO 时间；传 `null` 明确解除禁言 |
 | `admin/member/role` | `{ targetUserId, expectedVersion, role, reason }` | `{ ok, targetUserId, version, role }` | role 为 `member/moderator/admin`；不能自提权；降级/移除最后 moderator 被拒 |
 | `appeals/create` | `{ postId, contentVersion?, reason }` | `{ ok, appealId, state: "submitted", version: 1 }` | 只能作者对 `hidden`/`rejected` 内容发起；同内容同版本一条 |
-| `admin/appeal/decide` | `{ appealId, expectedVersion, decision, reason }` | `{ ok, appealId, status, postStatus, version }` | moderator/admin；决定理由必填；并发版本冲突拒绝 |
+| `appeals/mine` | `{ limit? }` | `{ ok, items: AppealDTO[] }` | 仅返回当前作者自己的申诉字段；不返回帖子正文、标题或举报人 |
+| `admin/appeals/list` | `{ limit? }` | `{ ok, items: AppealDTO[] }` | moderator/admin；队列只返回理由、状态、申诉/帖子 ID 与版本 |
+| `admin/appeal/decide` | `{ appealId, expectedVersion, decision, reason }` | `{ ok, appealId, status, postStatus, reviewTaskId?, version }` | moderator/admin；决定理由必填；批准进入带新版本的再次审核；并发版本冲突拒绝 |
+
+`AppealDTO` 只包含 `appealId`、`postId`、`contentVersion`、`status`、`reason`、
+`decision`、`decisionReason`、`version`、`createdAt` 和 `updatedAt`。领域层和
+RPC 层都使用字段白名单，避免私密原文或作者身份从管理队列泄露。
 
 客户端传来的 `targetUserId` 只是被操作对象。审计和 RPC 的 `p_actor_id` 始终来自 `ctx.viewer.userId`；不接受 payload 的 `userId` 作为调用者身份。
 
@@ -26,7 +32,9 @@ membership、角色、目标版本及最后 moderator 约束，因此不能通�
 
 通知只发送给被操作成员或申诉作者，内容只包含处理理由与结果，不含举报人、举报记录或匿名映射。申诉记录保留 `postId`、作者、内容版本、理由、状态、决定人和决定理由，便于运营追踪。
 
-申诉批准当前将 `hidden`/`rejected` 内容恢复为 `published`，属于人工治理决定；上线前应由运营确认这符合实际审核值守和内容安全要求。若产品需要“批准后再次安全检查”，应把 RPC 的批准分支改为 `pending` 并创建带版本的 review task。
+申诉批准会把 `hidden`/`rejected` 内容改为新版本的 `pending`，并在同一事务中创建
+带 `postVersion` 的 `hg_review_tasks` 记录。只有新的自动安全审核通过后，worker 才能
+把内容变为 `published`；申诉决定本身不会绕过审核。
 
 ## 熔断能力
 
@@ -52,7 +60,7 @@ npm run lint
 1. 部署 `20260922170000_governance.sql`，回读 `hg_appeals` 表、唯一索引、RPC 权限与函数定义。
 2. 将 action 映射到 `api/index.js`，并在前端契约登记。
 3. session 把 `membership.mutedUntil` 注入 `buildViewer`，验证发帖和评论在禁言期间均返回 `forbidden`。
-4. 用两个 moderator 并发移除同一成员、并发提交同一申诉，确认只有一个成功且审计/通知不重复。
+4. 用两个 moderator 并发移除同一成员、并发提交同一申诉，确认只有一个成功且审计/通知不重复；成员变更在统一 advisory lock 下读取 actor。
 5. 验证移除成员下一次请求立即失去成员权限，并验证最后一个 moderator 不能被移除或降级。
 
 本分支没有部署迁移、调用真实 RPC 或连接真实微信身份；这些是集成验收证据，不由本地单测替代。

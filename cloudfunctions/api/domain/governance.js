@@ -15,6 +15,18 @@ const db = require('../shared/db');
 
 const APPEAL_DECISIONS = ['approve', 'reject'];
 const MANAGEABLE_ROLES = [ROLE.MEMBER, ROLE.MODERATOR, ROLE.ADMIN];
+const APPEAL_DTO_FIELDS = [
+  'appealId',
+  'postId',
+  'contentVersion',
+  'status',
+  'reason',
+  'decision',
+  'decisionReason',
+  'version',
+  'createdAt',
+  'updatedAt',
+];
 
 function requiredReason(payload, field = 'reason') {
   return validators.requireString(payload[field], '处理理由', { max: 500 });
@@ -140,13 +152,48 @@ async function decideAppeal(payload, ctx) {
   return callGovernance('appeal.decide', { appealId, expectedVersion, decision, reason }, ctx);
 }
 
+/**
+ * Keep appeal reads as an explicit allow-list DTO.  The RPC already projects
+ * these fields, but this second boundary prevents a future SQL change from
+ * accidentally returning post bodies, owner identity, or reporter data.
+ */
+function presentAppeal(item = {}) {
+  return Object.fromEntries(APPEAL_DTO_FIELDS.map((field) => [field, item[field] === undefined ? null : item[field]]));
+}
+
+function presentAppealList(result) {
+  return {
+    ok: result && result.ok === true,
+    items: result && Array.isArray(result.items) ? result.items.map(presentAppeal) : [],
+  };
+}
+
+/** `appeals/mine`: an authenticated author can see only their own appeal DTOs. */
+async function listMyAppeals(payload = {}, ctx) {
+  if (!ctx.viewer.isAuthenticated) throw errors.unauthenticated();
+  const limit = validators.clampPageSize(payload.limit);
+  return presentAppealList(await callGovernance('appeals.mine', { limit }, ctx));
+}
+
+/** `admin/appeals/list`: moderation queue with no private post content. */
+async function listAppeals(payload = {}, ctx) {
+  if (!policies.canDecideAppeal(ctx.viewer)) throw errors.forbidden({ reason: 'not moderator' });
+  const limit = validators.clampPageSize(payload.limit);
+  return presentAppealList(await callGovernance('admin.appeals.list', { limit }, ctx));
+}
+
 module.exports = {
   removeMember,
   muteMember,
   changeMemberRole,
   createAppeal,
   decideAppeal,
+  listMyAppeals,
+  listAppeals,
+  presentAppeal,
+  presentAppealList,
   APPEAL_DECISIONS,
   MANAGEABLE_ROLES,
+  APPEAL_DTO_FIELDS,
   mapGovernanceError,
 };
