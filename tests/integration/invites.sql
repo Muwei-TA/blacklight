@@ -26,9 +26,9 @@ BEGIN
       'clubId', 'heiguang', 'status', 'active', 'role', 'member', 'version', 1));
 
   result := public.hg_governance_admin('members.list', moderator_id, '{"limit":100}'::jsonb);
-  SELECT item INTO item
-  FROM jsonb_array_elements(result->'items') AS rows(item)
-  WHERE item->>'targetUserId' = member_id;
+  SELECT entry INTO item
+  FROM jsonb_array_elements(result->'items') AS rows(entry)
+  WHERE entry->>'targetUserId' = member_id;
   IF item IS NULL THEN RAISE EXCEPTION 'member list missing fixture'; END IF;
   IF item ? 'wxOpenIdRef' OR item ? 'userId' THEN RAISE EXCEPTION 'member list leaked identity'; END IF;
   IF item->>'displayName' <> '普通成员' THEN RAISE EXCEPTION 'member display name mismatch'; END IF;
