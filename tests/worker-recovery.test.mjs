@@ -214,3 +214,20 @@ test('云存储删除失败保留资产记录并写 retryable 状态', async () 
   assert.equal(cleanupState.removes, 0);
   assert.equal(cleanupState.updates.some(({ data }) => data.cleanupState === 'retryable'), true);
 });
+
+test('worker cleanup 分支在文件确认删除后才把 revoked 标成 purged', async () => {
+  cleanupState.assets = [{
+    _id: 'asset-revoked',
+    fileId: 'cloud://revoked',
+    postId: 'post-deleted',
+    status: 'revoked',
+  }];
+  cleanupState.updates = [];
+  cleanupState.removes = 0;
+  fakeCloud.deleteFile = async () => ({ fileList: [{ fileID: 'cloud://revoked', status: 0 }] });
+
+  const result = await cleanup.cleanupDeletedPostAssets();
+  assert.equal(result.purged, 1);
+  assert.equal(result.retryable, 0);
+  assert.equal(cleanupState.updates.some(({ data }) => data.status === 'purged'), true);
+});

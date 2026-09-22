@@ -65,8 +65,10 @@ function taskLeaseCondition(task, now, _) {
     // Keep the due check in the conditional update as well as in the read
     // filter. This prevents a stale worker from claiming a newly deferred
     // task after another worker has written nextAttemptAt.
-    if (task.nextAttemptAt === undefined || task.nextAttemptAt === null) {
+    if (task.nextAttemptAt === undefined) {
       condition.nextAttemptAt = _.exists(false);
+    } else if (task.nextAttemptAt === null) {
+      condition.nextAttemptAt = null;
     } else {
       condition.nextAttemptAt = _.lte(new Date(now));
     }
