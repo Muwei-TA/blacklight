@@ -14,7 +14,6 @@ const {
   POST_STATUS,
   REVIEW_TASK_STATUS,
   ASSET_STATUS,
-  NOTIFY_TYPE,
 } = require('../shared/constants');
 const db = require('../shared/db');
 
@@ -42,6 +41,29 @@ async function checkText(content, openid) {
   return { pass: true, suspect: false };
 }
 
+async function finishReview(task, expectedVersion, decision, reason = '') {
+  const store = db.getDb();
+  if (!store || typeof store.rpc !== 'function') throw new Error('review RPC is not configured');
+  const result = await store.rpc('hg_finish_review', {
+    p_task_id: task._id,
+    p_lease_id: task.leaseId,
+    p_expected_version: expectedVersion,
+    p_decision: decision,
+    p_reason: reason,
+  });
+
+  // hg_finish_review owns the terminal task state.  Keep the local lease
+  // snapshot in the same shape so the existing worker conditional update can
+  // safely refresh metadata without reopening the task.
+  if (result && typeof result.status === 'string') {
+    task.status = result.status;
+    task.leaseId = '';
+    task.claimedAt = null;
+    task.leaseExpiresAt = null;
+  }
+  return result;
+}
+
 /** 审核一条内容 */
 async function reviewPost(task) {
   const post = await db.findOneById(COLLECTIONS.posts, task.targetId);
@@ -55,17 +77,26 @@ async function reviewPost(task) {
     return { status: REVIEW_TASK_STATUS.PASSED, note: `status already ${post.status}` };
   }
 
-  // 附件未全部 verified 时不推进：封面与正文过了不代表视频过了
-  if (task.needsMedia) {
-    const assets = await db.findByIds(COLLECTIONS.assets, post.assetIds || []);
-    const allVerified = assets.length === (post.assetIds || []).length && assets.every((a) => a.status === ASSET_STATUS.VERIFIED);
-    const anyRejected = assets.some((a) => a.status === ASSET_STATUS.REJECTED);
+  // 附件未全部 verified 时不推进：封面与正文过了不代表视频过了。
+  // The RPC repeats the binding/owner checks; this early read only decides
+  // whether the task should wait instead of spending a retry attempt.
+  const assetIds = post.assetIds || [];
+  let assetRejected = false;
+  if (assetIds.length > 0) {
+    const assets = await db.findByIds(COLLECTIONS.assets, assetIds);
+    const allVerified = assets.length === assetIds.length && assets.every((a) => (
+      a.status === ASSET_STATUS.VERIFIED
+      && a.postId === post._id
+      && a.ownerId === post.ownerId
+    ));
+    const anyRejected = assets.some((a) => (
+      a.status === ASSET_STATUS.REJECTED
+      || a.postId !== post._id
+      || a.ownerId !== post.ownerId
+    ));
 
-    if (anyRejected) {
-      await rejectPost(post, '附件未通过内容检查');
-      return { status: REVIEW_TASK_STATUS.FAILED, note: 'asset rejected' };
-    }
-    if (!allVerified) {
+    assetRejected = anyRejected;
+    if (!allVerified && !assetRejected) {
       // 重新排队等待附件处理完成
       return {
         status: REVIEW_TASK_STATUS.QUEUED,
@@ -73,6 +104,9 @@ async function reviewPost(task) {
         waitingReason: 'assets',
       };
     }
+    // A rejected or misbound asset is a terminal rejection, but we still run
+    // checkText first so every terminal decision follows a completed safety
+    // service call.
   }
 
   const owner = await db.findOneById(COLLECTIONS.users, post.ownerId);
@@ -87,58 +121,12 @@ async function reviewPost(task) {
   }
 
   if (!result.pass) {
-    await rejectPost(post, '内容未通过安全检查，请修改后重新提交');
-    return { status: REVIEW_TASK_STATUS.FAILED, note: `blocked: ${result.label || 'unknown'}` };
+    return finishReview(task, post.version || 1, 'reject', '内容未通过安全检查，请修改后重新提交');
   }
 
-  await approvePost(post);
-  return { status: REVIEW_TASK_STATUS.PASSED };
-}
+  if (assetRejected) return finishReview(task, post.version || 1, 'reject', '附件未通过内容检查');
 
-async function approvePost(post) {
-  await db.updateWithVersion(COLLECTIONS.posts, post._id, post.version || 1, {
-    status: POST_STATUS.PUBLISHED,
-    reviewedAt: db.serverDate(),
-    reviewedBy: 'system',
-  });
-
-  if (post.topicId) await db.incCounter(COLLECTIONS.topics, post.topicId, 'postCount', 1);
-
-  await db.coll(COLLECTIONS.notifications).add({
-    data: {
-      recipientId: post.ownerId,
-      eventType: NOTIFY_TYPE.SYSTEM_REVIEW,
-      title: '你的内容已通过审核',
-      summary: '现在会在你设定的范围内展示。',
-      targetType: 'post',
-      targetId: post._id,
-      icon: 'check-circle',
-      createdAt: db.serverDate(),
-    },
-  });
-}
-
-async function rejectPost(post, reason) {
-  await db.updateWithVersion(COLLECTIONS.posts, post._id, post.version || 1, {
-    status: POST_STATUS.REJECTED,
-    rejectReason: reason,
-    reviewedAt: db.serverDate(),
-    reviewedBy: 'system',
-  });
-
-  await db.coll(COLLECTIONS.notifications).add({
-    data: {
-      recipientId: post.ownerId,
-      eventType: NOTIFY_TYPE.SYSTEM_REVIEW,
-      title: '一条内容需要修改',
-      // 保留原记录，作者取消编辑不会丢失内容
-      summary: `${reason}。原文已保留，可以修改后重新提交。`,
-      targetType: 'post',
-      targetId: post._id,
-      icon: 'error-circle',
-      createdAt: db.serverDate(),
-    },
-  });
+  return finishReview(task, post.version || 1, 'approve');
 }
 
 /** 审核评论 */
@@ -155,35 +143,10 @@ async function reviewComment(task) {
   if (result.suspect) return { status: REVIEW_TASK_STATUS.MANUAL, note: 'suspect comment' };
 
   if (!result.pass) {
-    await db.coll(COLLECTIONS.comments).doc(comment._id).update({
-      data: { status: POST_STATUS.REJECTED, rejectReason: '未通过安全检查', updatedAt: db.serverDate() },
-    });
-    return { status: REVIEW_TASK_STATUS.FAILED };
+    return finishReview(task, comment.version || 1, 'reject', '未通过安全检查');
   }
 
-  await db.coll(COLLECTIONS.comments).doc(comment._id).update({
-    data: { status: POST_STATUS.PUBLISHED, updatedAt: db.serverDate() },
-  });
-  await db.incCounter(COLLECTIONS.posts, comment.postId, 'commentCount', 1);
-
-  // 通知被回应者：文案中性，不含正文原文
-  const post = await db.findOneById(COLLECTIONS.posts, comment.postId);
-  if (post && post.ownerId !== comment.ownerId) {
-    await db.coll(COLLECTIONS.notifications).add({
-      data: {
-        recipientId: post.ownerId,
-        eventType: comment.replyToId ? NOTIFY_TYPE.REPLY : NOTIFY_TYPE.COMMENT,
-        title: '有人回应了你的内容',
-        summary: '',
-        targetType: 'post',
-        targetId: comment.postId,
-        icon: 'chat-bubble-1',
-        createdAt: db.serverDate(),
-      },
-    });
-  }
-
-  return { status: REVIEW_TASK_STATUS.PASSED };
+  return finishReview(task, comment.version || 1, 'approve');
 }
 
 /**
@@ -203,4 +166,4 @@ async function precheckCollectionSubmission(task) {
   return { status: REVIEW_TASK_STATUS.QUEUED, note: 'awaiting editor decision' };
 }
 
-module.exports = { checkText, reviewPost, reviewComment, precheckCollectionSubmission, approvePost, rejectPost };
+module.exports = { checkText, reviewPost, reviewComment, precheckCollectionSubmission, finishReview };
