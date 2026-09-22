@@ -163,7 +163,7 @@ async function cleanupOrphanAssets() {
       continue;
     }
 
-    const deletion = await deleteFiles([asset.fileId]);
+    const deletion = await deleteFiles([asset.fileId, asset.cleanedFileId, asset.reservedFileId]);
     if (deletion.failed.length > 0) {
       await preserveRetryableAsset(asset, new Error(deletion.failed[0].error), {
         postId: '',
@@ -217,7 +217,7 @@ async function cleanupDeletedPostAssets() {
       continue;
     }
 
-    const deletion = await deleteFiles([asset.fileId]);
+    const deletion = await deleteFiles([asset.fileId, asset.cleanedFileId, asset.reservedFileId]);
     if (deletion.failed.length > 0) {
       await preserveRetryableAsset(asset, new Error(deletion.failed[0].error), {
         status: 'revoked',
@@ -284,84 +284,39 @@ async function cleanupIdempotency() {
  */
 async function processAccountDeletions() {
   const _ = db.command();
-  const cutoff = new Date(Date.now() - DELETION_GRACE);
-
-  const res = await db
-    .coll(COLLECTIONS.users)
-    .where({
-      status: _.in(['deletion_requested', 'deletion_processing']),
-      deletionRequestedAt: _.lt(cutoff),
-    })
-    .limit(10)
-    .get();
-
+  const now = Date.now();
+  const cutoff = new Date(now - DELETION_GRACE);
+  const due = { $or: [{ deletionNextAttemptAt: null }, { deletionNextAttemptAt: _.lte(new Date(now)) }] };
+  const lease = { $or: [{ deletionLeaseUntil: null }, { deletionLeaseUntil: _.lte(new Date(now)) }] };
+  const res = await db.coll(COLLECTIONS.users).where({
+    status: _.in(['deletion_requested', 'deletion_processing']), deletionRequestedAt: _.lt(cutoff),
+    $and: [due, lease],
+  }).limit(10).get();
   let processed = 0;
   let retryable = 0;
-
   for (const user of res.data || []) {
-    const claimed = await db
-      .coll(COLLECTIONS.users)
-      .where({ _id: user._id, status: user.status })
-      .update({ data: { status: 'deletion_processing', deletionStartedAt: db.serverDate() } });
+    const leaseId = recovery.createLeaseId('account-deletion');
+    const claimed = await db.coll(COLLECTIONS.users).where({ _id: user._id, status: user.status, ...lease }).update({
+      data: { status: 'deletion_processing', deletionLeaseId: leaseId, deletionLeaseUntil: new Date(now+CLEANUP_LEASE_MS), deletionStartedAt: db.serverDate() },
+    });
     if (!claimed.stats || claimed.stats.updated !== 1) continue;
-
     try {
-      // 1. 停止展示该用户全部内容
-      await db
-        .coll(COLLECTIONS.posts)
-        .where({ ownerId: user._id })
-        .update({ data: { status: POST_STATUS.DELETED, deletedAt: db.serverDate() } });
-
-      // 2. 将附件置为 revoked，由 cleanupDeletedPostAssets 实际删除文件
-      await db
-        .coll(COLLECTIONS.assets)
-        .where({ ownerId: user._id, status: _.in(orphanStatuses().concat(['verified', 'revoked'])) })
-        .update({ data: { status: 'revoked', revokedAt: db.serverDate(), updatedAt: db.serverDate() } });
-
-      // 3. 撤销成员资格
-      await db
-        .coll(COLLECTIONS.memberships)
-        .where({ userId: user._id })
-        .update({ data: { status: 'removed', removedAt: db.serverDate() } });
-
-      // 4. 清除匿名映射：注销后不应再能反查其匿名历史
-      await db.coll(COLLECTIONS.anonymousIdentities).where({ userId: user._id }).remove();
-
-      // 5. 清理可识别资料，但在审计成功前不把账号标为完成
-      await db.writeAudit({
-        actorId: 'system',
-        action: 'account.deletion_executed',
-        targetType: 'user',
-        targetId: user._id,
-        reason: 'grace period elapsed',
-      });
-
-      const completed = await db
-        .coll(COLLECTIONS.users)
-        .where({ _id: user._id, status: 'deletion_processing' })
-        .update({
-          data: {
-            wxOpenIdRef: '',
-            displayName: '已注销成员',
-            avatar: '',
-            status: 'deleted',
-            deletedAt: db.serverDate(),
-            deletionCompletedAt: db.serverDate(),
-          },
-        });
-      if (!completed.stats || completed.stats.updated !== 1) {
-        throw new Error('account completion state update failed');
-      }
+      await db.coll(COLLECTIONS.posts).where({ ownerId: user._id, status: _.neq(POST_STATUS.DELETED) }).update({ data: { status: POST_STATUS.DELETED, deletedAt: db.serverDate() } });
+      await db.coll(COLLECTIONS.assets).where({ ownerId: user._id, status: _.nin(['purged','revoked']) }).update({ data: { status: 'revoked', revokedAt: db.serverDate(), updatedAt: db.serverDate() } });
+      await db.coll(COLLECTIONS.memberships).where({ userId: user._id }).update({ data: { status: 'removed', removedAt: db.serverDate() } });
+      await cleanupDeletedPostAssets();
+      const files = await db.coll(COLLECTIONS.assets).where({ ownerId: user._id, status: _.neq('purged') }).count();
+      if (files.total) throw new Error('waiting for file deletion confirmation');
+      await db.getDb().rpc('hg_finish_account_deletion', { p_user: user._id, p_lease: leaseId });
       processed += 1;
     } catch (err) {
       retryable += 1;
-      console.error('[cleanup] account deletion retained for retry', {
-        userId: user._id,
-        message: safeErrorMessage(err),
+      await db.coll(COLLECTIONS.users).where({ _id: user._id, deletionLeaseId: leaseId }).update({
+        data: { deletionLastError: safeErrorMessage(err), deletionNextAttemptAt: new Date(now+60*1000), deletionLeaseUntil: null, deletionLeaseId: '' },
       });
+      console.error('[cleanup] account deletion requires retry', { message: safeErrorMessage(err) });
     }
   }
-
   return { processed, retryable };
 }
 

@@ -218,18 +218,11 @@ async function requestAccountDeletion(payload, ctx) {
   const confirm = validators.requireString(payload.confirm, '确认串', { max: 20 });
   if (confirm !== '注销') throw errors.invalidInput('请输入「注销」以确认', { field: 'confirm' });
 
-  await db.coll(COLLECTIONS.users).doc(ctx.viewer.userId).update({
-    data: { status: 'deletion_requested', deletionRequestedAt: db.serverDate() },
-  });
-
-  await db.writeAudit({
-    actorId: ctx.viewer.userId,
-    action: 'account.deletion_request',
-    targetType: 'user',
-    targetId: ctx.viewer.userId,
-  });
-
-  return { state: 'pending' };
+  try { return await db.getDb().rpc('hg_request_account_deletion', { p_user: ctx.viewer.userId }); }
+  catch (err) {
+    if (/LAST_MODERATOR/.test(err.message)) throw errors.conflict('请先指定另一位管理员，再申请注销');
+    throw err;
+  }
 }
 
 module.exports = {
