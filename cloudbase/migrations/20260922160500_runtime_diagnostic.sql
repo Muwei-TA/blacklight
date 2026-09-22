@@ -1,0 +1,1 @@
+CREATE FUNCTION public.hg_runtime_role() RETURNS jsonb LANGUAGE sql STABLE SECURITY INVOKER AS $$ SELECT jsonb_build_object('databaseRole',current_user,'authRole',auth.role()) $$; GRANT EXECUTE ON FUNCTION public.hg_runtime_role() TO PUBLIC;

@@ -5,6 +5,8 @@
   "description": "黑光树洞 · 内容安全异步检查结果回调",
   "main": "index.js",
   "dependencies": {
-    "wx-server-sdk": "~2.6.3"
+    "wx-server-sdk": "4.0.2",
+    "@cloudbase/js-sdk": "3.10.0",
+    "@cloudbase/node-sdk": "3.18.3"
   }
 }

@@ -250,6 +250,8 @@ function presentSession({ viewer, user, capabilities, club }) {
     memberStatus: viewer.memberStatus,
     user: presentUser(user),
     capabilities: {
+      publishing: !!(capabilities && capabilities.publishing),
+      uploads: !!(capabilities && capabilities.uploads),
       publicScope: !!(capabilities && capabilities.publicScope),
       video: !!(capabilities && capabilities.video),
       anthology: !!(capabilities && capabilities.anthology),

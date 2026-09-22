@@ -9,6 +9,7 @@
  *   4) 组装 DTO（presenters）
  */
 
+const { randomUUID, createHash } = require('node:crypto');
 const {
   COLLECTIONS,
   POST_STATUS,
@@ -209,9 +210,9 @@ async function createPost(payload, ctx) {
     throw errors.forbidden({ reason: 'publicScope disabled' });
   }
 
-  const idempotencyKey = payload.idempotencyKey || '';
-  const claim = await db.claimIdempotency(idempotencyKey, ctx.viewer.userId, 'createPost');
-  if (!claim.isNew && claim.result) return claim.result;
+  const idempotencyKey = validators.requireString(payload.idempotencyKey, '请求标识', { max: 120 });
+  if (ctx.capabilities.publishing === false) throw errors.forbidden({ reason: 'publishing paused' });
+  if (input.assetIds.length && ctx.capabilities.uploads !== true) throw errors.forbidden({ reason: 'uploads disabled' });
 
   // 校验附件归属与状态：只能绑定本人已验证的附件
   let hasVideo = false;
@@ -244,8 +245,8 @@ async function createPost(payload, ctx) {
   const isPrivate = input.visibility === VISIBILITY.PRIVATE;
   const status = isPrivate ? POST_STATUS.PUBLISHED : POST_STATUS.PENDING;
 
-  const added = await db.coll(COLLECTIONS.posts).add({
-    data: {
+  const postId = randomUUID();
+  const post = {
       clubId: DEFAULT_CLUB_ID,
       ownerId: ctx.viewer.userId,
       kind: input.kind,
@@ -265,60 +266,23 @@ async function createPost(payload, ctx) {
       commentCount: 0,
       createdAt: db.serverDate(),
       updatedAt: db.serverDate(),
-    },
-  });
-
-  const postId = added._id;
-
-  // 匿名内容：生成线程内稳定别名，映射写受限集合
+    };
+  post._id = postId;
+  let aliasDoc = null;
   if (input.identityMode === IDENTITY_MODE.ANONYMOUS) {
     const { alias, aliasKey } = anonymity.deriveAlias(postId, ctx.viewer.userId, process.env.ANON_ALIAS_SECRET);
-    await db.coll(COLLECTIONS.anonymousIdentities).add({
-      data: {
-        threadId: postId,
-        userId: ctx.viewer.userId,
-        alias,
-        aliasKey,
-        isThreadAuthor: true,
-        createdAt: db.serverDate(),
-      },
+    aliasDoc = { _id: randomUUID(), threadId: postId, userId: ctx.viewer.userId, alias, aliasKey, isThreadAuthor: true, createdAt: post.createdAt };
+  }
+  const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, category: post.category })).digest('hex');
+  try {
+    return await db.getDb().rpc('hg_create_post', {
+      p_key: `${ctx.viewer.userId}:createPost:${idempotencyKey}`,
+      p_hash: fingerprint, p_post: post, p_alias: aliasDoc,
     });
+  } catch (err) {
+    if (/IDEMPOTENCY_|ASSET_BINDING_CONFLICT/.test(err.message)) throw errors.conflict('请求内容或附件状态已变化，请刷新后重试');
+    throw err;
   }
-
-  // 非私密内容排入审核队列；worker 负责实际调用内容安全服务
-  if (!isPrivate) {
-    await db.coll(COLLECTIONS.reviewTasks).add({
-      data: {
-        targetType: 'post',
-        targetId: postId,
-        postVersion: 1,
-        status: REVIEW_TASK_STATUS.QUEUED,
-        attempts: 0,
-        needsMedia: input.assetIds.length > 0,
-        createdAt: db.serverDate(),
-      },
-    });
-  }
-
-  // 附件绑定到内容版本，防止任意 fileId 被挂接
-  if (input.assetIds.length > 0) {
-    await Promise.all(
-      input.assetIds.map((assetId) =>
-        db
-          .coll(COLLECTIONS.assets)
-          .doc(assetId)
-          .update({ data: { postId, postVersion: 1, updatedAt: db.serverDate() } }),
-      ),
-    );
-  }
-
-  const result = {
-    id: postId,
-    version: 1,
-    state: isPrivate ? 'private_saved' : 'pending',
-  };
-  await db.completeIdempotency(idempotencyKey, ctx.viewer.userId, 'createPost', result);
-  return result;
 }
 
 /** PATCH /posts/{id}/visibility —— 首版只允许缩小 */

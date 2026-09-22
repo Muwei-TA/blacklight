@@ -27,6 +27,7 @@ function buildStoragePath(userId, mediaType, assetId) {
 /** POST /assets/upload-intents */
 async function createIntent(payload, ctx) {
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
+  if (ctx.capabilities.uploads !== true) throw errors.forbidden({ reason: 'uploads disabled until media validation' });
 
   const input = validators.validateUploadIntent(payload);
   if (input.mediaType === 'video' && !policies.canUploadVideo(ctx.viewer, ctx.capabilities)) {
@@ -67,6 +68,7 @@ async function createIntent(payload, ctx) {
  */
 async function confirmUpload(payload, ctx) {
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
+  if (ctx.capabilities.uploads !== true) throw errors.forbidden({ reason: 'uploads disabled until media validation' });
 
   const assetId = validators.requireId(payload.assetId, 'assetId');
   const fileId = validators.requireString(payload.fileId, 'fileId', { max: 300 });

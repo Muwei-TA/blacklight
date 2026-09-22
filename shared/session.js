@@ -14,6 +14,8 @@ const { buildViewer, GUEST_VIEWER } = require('./policies');
 
 /** 能力开关默认全关。读取失败时保持关闭（fail-closed）。 */
 const DEFAULT_CAPABILITIES = {
+  publishing: true,
+  uploads: false,
   publicScope: false,
   video: false,
   anthology: false,
@@ -30,7 +32,9 @@ async function resolveUser(openid) {
   const res = await coll(COLLECTIONS.users).where({ wxOpenIdRef: openid }).limit(1).get();
   if (res.data && res.data.length > 0) return res.data[0];
 
-  const added = await coll(COLLECTIONS.users).add({
+  let added;
+  try {
+    added = await coll(COLLECTIONS.users).add({
     data: {
       wxOpenIdRef: openid,
       displayName: '',
@@ -40,6 +44,12 @@ async function resolveUser(openid) {
       updatedAt: serverDate(),
     },
   });
+  } catch (err) {
+    if (!/23505/.test(String(err.code))) throw err;
+    const raced = await coll(COLLECTIONS.users).where({ wxOpenIdRef: openid }).limit(1).get();
+    if (!raced.data[0]) throw err;
+    return raced.data[0];
+  }
   return findOneById(COLLECTIONS.users, added._id);
 }
 
@@ -74,7 +84,7 @@ async function resolveContext(openid, clubId = DEFAULT_CLUB_ID) {
   }
 
   const user = await resolveUser(openid);
-  if (!user) {
+  if (!user || user.status !== 'active') {
     return { viewer: GUEST_VIEWER, user: null, membership: null, club, capabilities };
   }
 

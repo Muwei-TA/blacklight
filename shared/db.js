@@ -18,7 +18,7 @@ function getCloud() {
 }
 
 function getDb() {
-  return getCloud().database();
+  return require('./pg-store');
 }
 
 function command() {
@@ -80,7 +80,7 @@ async function findByIds(name, ids = []) {
 
 async function findOneById(name, id) {
   if (!id) return null;
-  const res = await coll(name).doc(id).get().catch(() => null);
+  const res = await coll(name).doc(id).get();
   return res && res.data ? res.data : null;
 }
 
@@ -131,8 +131,7 @@ async function completeIdempotency(key, userId, action, result) {
   const docId = `${userId}:${action}:${key}`;
   await coll(COLLECTIONS.idempotency)
     .doc(docId)
-    .update({ data: { result, completedAt: serverDate() } })
-    .catch(() => {});
+    .update({ data: { result, completedAt: serverDate() } });
 }
 
 /**

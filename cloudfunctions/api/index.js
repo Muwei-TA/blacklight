@@ -2,7 +2,7 @@
  * api 云函数：所有面向小程序的读写请求入口。
  *
  * 调用约定（小程序端）：
- *   wx.cloud.callFunction({ name: 'api', data: { action, payload, idempotencyKey? } })
+ *   wx.cloud.callFunction({ name: 'api', data: { action, payload: { ...data, idempotencyKey? } } })
  *
  * action 命名与前端 docs/04-data-model-and-api.md 的接口一一对应。
  * 新增 action 必须同时更新前端工程书，否则视为契约破坏。

@@ -5,6 +5,8 @@
   "description": "黑光树洞 · 小程序请求入口云函数",
   "main": "index.js",
   "dependencies": {
-    "wx-server-sdk": "~2.6.3"
+    "wx-server-sdk": "4.0.2",
+    "@cloudbase/js-sdk": "3.10.0",
+    "@cloudbase/node-sdk": "3.18.3"
   }
 }
