@@ -24,25 +24,22 @@ const db = require('../shared/db');
  */
 async function checkText(content, openid) {
   if (!content || !content.trim()) return { pass: true, suspect: false };
-
-  try {
-    const res = await cloud.openapi.security.msgSecCheck({
-      version: 2,
-      openid,
-      scene: 2, // 2 = 社交日志
-      content: content.slice(0, 2500),
-    });
-
-    const label = res.result && res.result.label;
-    const suggest = res.result && res.result.suggest;
-
-    if (suggest === 'pass') return { pass: true, suspect: false, label };
+  // Every character must be reviewed. Long articles cannot silently bypass
+  // review after the first 2500 characters. Overlap preserves boundary context.
+  const chars = Array.from(content);
+  for (let offset = 0; offset < chars.length; offset += 2300) {
+    const chunk = chars.slice(offset, offset + 2500).join('');
+    let res;
+    try {
+      res = await cloud.openapi.security.msgSecCheck({ version: 2, openid, scene: 2, content: chunk });
+    } catch (err) {
+      throw new Error(`msgSecCheck failed: ${err.errCode || 'unavailable'}`);
+    }
+    const { label, suggest } = res.result || {};
     if (suggest === 'review') return { pass: false, suspect: true, label };
-    return { pass: false, suspect: false, label };
-  } catch (err) {
-    // 接口未开通 / 调用失败：不放行，抛出让调度层重试或转人工
-    throw new Error(`msgSecCheck failed: ${err.errCode || ''} ${err.message}`);
+    if (suggest !== 'pass') return { pass: false, suspect: false, label };
   }
+  return { pass: true, suspect: false };
 }
 
 /** 审核一条内容 */
