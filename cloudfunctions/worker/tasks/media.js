@@ -73,6 +73,15 @@ async function processAsset(task) {
   if (asset.status === ASSET_STATUS.VERIFIED || asset.status === ASSET_STATUS.REJECTED) {
     return { status: REVIEW_TASK_STATUS.PASSED, note: `already ${asset.status}` };
   }
+  if (asset.status === ASSET_STATUS.VERIFYING) {
+    // A callback may still be in flight. Re-submitting the same file would
+    // create a second trace and let an older callback race the newer one.
+    return {
+      status: REVIEW_TASK_STATUS.QUEUED,
+      note: 'waiting for async media callback',
+      waitingReason: 'media_callback',
+    };
+  }
   if (asset.status !== ASSET_STATUS.UPLOADED && asset.status !== ASSET_STATUS.VERIFYING) {
     return { status: REVIEW_TASK_STATUS.QUEUED, note: `waiting upload, now ${asset.status}` };
   }
@@ -110,17 +119,25 @@ async function processAsset(task) {
   // 视频：提交异步检查后停在 verifying，等回调
   const owner = await db.findOneById(COLLECTIONS.users, asset.ownerId);
   const { traceId } = await submitVideoCheck(asset, meta.tempFileURL, owner && owner.wxOpenIdRef);
+  if (!traceId) throw new Error('mediaCheckAsync returned no traceId');
 
-  await db.coll(COLLECTIONS.assets).doc(asset._id).update({
+  const reviewVersion = (Number(asset.reviewVersion) || 0) + 1;
+  const bindCondition = { _id: asset._id, status: ASSET_STATUS.UPLOADED };
+  if (asset.postVersion !== undefined) bindCondition.postVersion = asset.postVersion;
+  const bound = await db.coll(COLLECTIONS.assets).where(bindCondition).update({
     data: {
       status: ASSET_STATUS.VERIFYING,
       traceId,
+      reviewVersion,
       tempFileURL: '',
       actualSize: meta.actualSize,
       submittedAt: db.serverDate(),
       updatedAt: db.serverDate(),
     },
   });
+  if (!bound.stats || bound.stats.updated !== 1) {
+    throw new Error('asset changed before async review binding');
+  }
 
   return {
     status: REVIEW_TASK_STATUS.MANUAL,

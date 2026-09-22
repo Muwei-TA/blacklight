@@ -70,7 +70,11 @@ async function reviewPost(task) {
     }
     if (!allVerified) {
       // 重新排队等待附件处理完成
-      return { status: REVIEW_TASK_STATUS.QUEUED, note: 'waiting for assets' };
+      return {
+        status: REVIEW_TASK_STATUS.QUEUED,
+        note: 'waiting for assets',
+        waitingReason: 'assets',
+      };
     }
   }
 
