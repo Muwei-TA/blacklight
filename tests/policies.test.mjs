@@ -182,6 +182,45 @@ test('视频能力关闭时不可上传视频', () => {
   assert.equal(policies.canUploadVideo(guest, { video: true }), false);
 });
 
+test('发布与上传熔断能力缺失时 fail-closed', () => {
+  assert.equal(policies.canUsePublishing(member, { publishing: true }), true);
+  assert.equal(policies.canUsePublishing(member, { publishing: false }), false);
+  assert.equal(policies.canUsePublishing(member, undefined), false);
+  assert.equal(policies.canUseUploads(member, { uploads: true }), true);
+  assert.equal(policies.canUseUploads(member, { uploads: false }), false);
+  assert.equal(policies.canUseUploads(guest, { uploads: true }), false);
+});
+
+test('禁言期间不能发帖和评论，过期后恢复', () => {
+  const now = Date.now();
+  const muted = policies.buildViewer({
+    userId: 'u_member',
+    role: ROLE.MEMBER,
+    memberStatus: MEMBER_STATUS.ACTIVE,
+    mutedUntil: new Date(now + 60_000).toISOString(),
+  });
+  assert.equal(policies.isMuted(muted, now), true);
+  assert.equal(policies.canCreatePost(muted), false);
+  assert.equal(policies.canComment(muted, makePost({ ownerId: 'u_other' })), false);
+  assert.equal(policies.isMuted(muted, now + 61_000), false);
+  assert.equal(policies.canCreatePost({ ...muted, mutedUntil: new Date(now - 1_000).toISOString() }), true);
+});
+
+test('成员管理只允许 moderator 且不能操作自己', () => {
+  assert.equal(policies.canManageMembers(moderator), true);
+  assert.equal(policies.canManageMembers(admin), false);
+  assert.equal(policies.canManageTargetMember(moderator, 'u_member'), true);
+  assert.equal(policies.canManageTargetMember(moderator, 'u_mod'), false);
+});
+
+test('申诉只允许作者对 hidden/rejected 内容发起', () => {
+  assert.equal(policies.canSubmitAppeal(member, makePost({ status: POST_STATUS.HIDDEN })), true);
+  assert.equal(policies.canSubmitAppeal(member, makePost({ status: POST_STATUS.REJECTED })), true);
+  assert.equal(policies.canSubmitAppeal(other, makePost({ status: POST_STATUS.HIDDEN })), false);
+  assert.equal(policies.canSubmitAppeal(member, makePost({ status: POST_STATUS.PUBLISHED })), false);
+  assert.equal(policies.canDecideAppeal(admin), true);
+});
+
 test('待审话题只有提交者与管理员可见', () => {
   const pendingTopic = { _id: 't1', ownerId: 'u_member', status: TOPIC_STATUS.PENDING };
   assert.equal(policies.canReadTopic(member, pendingTopic), true);

@@ -22,7 +22,13 @@ const { VISIBILITY, POST_STATUS, ROLE, MEMBER_STATUS, TOPIC_STATUS } = require('
  * @param {string} params.memberStatus MEMBER_STATUS 枚举
  * @param {string|null} params.clubId
  */
-function buildViewer({ userId = null, role = ROLE.GUEST, memberStatus = MEMBER_STATUS.NONE, clubId = null } = {}) {
+function buildViewer({
+  userId = null,
+  role = ROLE.GUEST,
+  memberStatus = MEMBER_STATUS.NONE,
+  clubId = null,
+  mutedUntil = null,
+} = {}) {
   const isActiveMember = memberStatus === MEMBER_STATUS.ACTIVE;
   return Object.freeze({
     userId,
@@ -31,6 +37,7 @@ function buildViewer({ userId = null, role = ROLE.GUEST, memberStatus = MEMBER_S
     rawRole: role,
     memberStatus,
     clubId,
+    mutedUntil,
     isAuthenticated: !!userId,
     isMember: isActiveMember,
     isAdmin: isActiveMember && (role === ROLE.ADMIN || role === ROLE.MODERATOR),
@@ -103,6 +110,7 @@ function canInteract(viewer, post) {
 
 function canComment(viewer, post) {
   if (!canInteract(viewer, post)) return false;
+  if (isMuted(viewer)) return false;
   return post.commentsEnabled !== false;
 }
 
@@ -143,7 +151,42 @@ function canReportPost(viewer, post) {
 
 /** 能否发布内容：必须是有效成员 */
 function canCreatePost(viewer) {
-  return viewer.isMember;
+  return viewer.isMember && !isMuted(viewer);
+}
+
+/** 禁言由 session 注入 viewer.mutedUntil；过期后自动恢复，不依赖客户端状态。 */
+function isMuted(viewer, now = Date.now()) {
+  if (!viewer || !viewer.mutedUntil) return false;
+  const until = new Date(viewer.mutedUntil).getTime();
+  return Number.isFinite(until) && until > now;
+}
+
+/** 发布与上传熔断的唯一策略谓词；能力缺失时 fail-closed。 */
+function canUsePublishing(viewer, capabilities) {
+  return !!(viewer && viewer.isMember && !isMuted(viewer) && capabilities && capabilities.publishing === true);
+}
+
+function canUseUploads(viewer, capabilities) {
+  return !!(viewer && viewer.isMember && !isMuted(viewer) && capabilities && capabilities.uploads === true);
+}
+
+/** 成员管理比普通治理队列更窄：必须是 active moderator，且不能操作自己。 */
+function canManageMembers(viewer) {
+  return !!(viewer && viewer.isModerator);
+}
+
+function canManageTargetMember(viewer, targetUserId) {
+  return canManageMembers(viewer) && typeof targetUserId === 'string' && targetUserId.length > 0 && targetUserId !== viewer.userId;
+}
+
+/** 申诉只允许作者对自己被隐藏/退回的内容发起。 */
+function canSubmitAppeal(viewer, post) {
+  if (!viewer || !post || !viewer.userId || post.ownerId !== viewer.userId) return false;
+  return post.status === POST_STATUS.HIDDEN || post.status === POST_STATUS.REJECTED;
+}
+
+function canDecideAppeal(viewer) {
+  return canAccessModeration(viewer);
 }
 
 /**
@@ -245,6 +288,13 @@ module.exports = {
   canDeletePost,
   canReportPost,
   canCreatePost,
+  isMuted,
+  canUsePublishing,
+  canUseUploads,
+  canManageMembers,
+  canManageTargetMember,
+  canSubmitAppeal,
+  canDecideAppeal,
   canUsePublicVisibility,
   canUploadVideo,
   canReadTopic,
