@@ -1,0 +1,51 @@
+{
+  "version": "2.0",
+  "envId": "{{env.TCB_ENV_ID}}",
+  "$schema": "https://framework-1258016615.tcloudbaseapp.com/schema/latest.json",
+  "functionRoot": "cloudfunctions",
+  "functions": [
+    {
+      "name": "api",
+      "timeout": 15,
+      "runtime": "Nodejs16.13",
+      "memorySize": 256,
+      "handler": "index.main",
+      "installDependency": true,
+      "envVariables": {
+        "ANON_ALIAS_SECRET": "{{env.ANON_ALIAS_SECRET}}",
+        "NODE_ENV": "production"
+      }
+    },
+    {
+      "name": "worker",
+      "timeout": 60,
+      "runtime": "Nodejs16.13",
+      "memorySize": 512,
+      "handler": "index.main",
+      "installDependency": true,
+      "envVariables": {
+        "ANON_ALIAS_SECRET": "{{env.ANON_ALIAS_SECRET}}",
+        "NODE_ENV": "production"
+      },
+      "triggers": [
+        {
+          "name": "review-tick",
+          "type": "timer",
+          "config": "0 * * * * * *"
+        }
+      ]
+    },
+    {
+      "name": "review-callback",
+      "timeout": 20,
+      "runtime": "Nodejs16.13",
+      "memorySize": 256,
+      "handler": "index.main",
+      "installDependency": true,
+      "envVariables": {
+        "REVIEW_CALLBACK_SECRET": "{{env.REVIEW_CALLBACK_SECRET}}",
+        "NODE_ENV": "production"
+      }
+    }
+  ]
+}

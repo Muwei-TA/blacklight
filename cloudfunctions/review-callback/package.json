@@ -1,0 +1,10 @@
+{
+  "name": "review-callback",
+  "version": "0.1.0",
+  "private": true,
+  "description": "黑光树洞 · 内容安全异步检查结果回调",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

@@ -1,0 +1,19 @@
+node_modules/
+npm-debug.log*
+package-lock.json.bak
+
+# 云函数构建产物：shared/ 由 scripts/sync-shared.mjs 从根目录 shared/ 同步生成
+cloudfunctions/*/shared/
+
+# 凭证与密钥，绝不提交
+*.key
+.env
+.env.*
+!.env.example
+cloudbaserc.local.json
+
+# 本地运行产物
+coverage/
+.nyc_output/
+tmp/
+*.local.json

@@ -1,0 +1,10 @@
+{
+  "name": "api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "黑光树洞 · 小程序请求入口云函数",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}
