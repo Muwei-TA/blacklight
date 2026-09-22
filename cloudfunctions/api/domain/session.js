@@ -37,45 +37,27 @@ async function apply(payload, ctx) {
   const inviteCode = validators.requireString(payload.inviteCode, '邀请码', { max: 32 });
   const rulesVersion = validators.requireString(payload.rulesVersion, '规则版本', { max: 20 });
 
-  const codeDoc = await db.findOneById(COLLECTIONS.inviteCodes, inviteCode.toUpperCase());
-  const now = Date.now();
-  const codeValid =
-    codeDoc &&
-    !codeDoc.revokedAt &&
-    (!codeDoc.expiresAt || presenters.toMillis(codeDoc.expiresAt) > now) &&
-    (!codeDoc.maxUses || (codeDoc.usedCount || 0) < codeDoc.maxUses);
-
-  if (!codeValid) {
-    // 统一文案，不区分「不存在 / 已过期 / 已用完」，减少枚举空间
-    throw errors.invalidInput('邀请码无效或已过期', { field: 'inviteCode' });
+  try {
+    const store = db.getDb();
+    if (!store || typeof store.rpc !== 'function') throw new Error('membership RPC is not configured');
+    return await store.rpc('hg_apply_membership', {
+      p_actor_id: ctx.viewer.userId,
+      p_input: { displayName, inviteCode: inviteCode.toUpperCase(), rulesVersion },
+    });
+  } catch (error) {
+    const marker = `${error && error.code ? error.code : ''} ${error && error.message ? error.message : ''}`;
+    if (/INVITE_INVALID/.test(marker)) {
+      // 统一文案，不区分「不存在 / 已过期 / 用尽」，减少枚举空间。
+      throw errors.invalidInput('邀请码无效或已过期', { field: 'inviteCode' });
+    }
+    if (/RULES_VERSION_INVALID/.test(marker)) {
+      throw errors.invalidInput('规则版本已更新，请刷新后重试', { field: 'rulesVersion' });
+    }
+    if (/ALREADY_MEMBER/.test(marker)) throw errors.invalidInput('你已经是社内成员');
+    if (/FORBIDDEN/.test(marker)) throw errors.forbidden();
+    if (/INVALID/.test(marker)) throw errors.invalidInput('请求参数不合法');
+    throw error;
   }
-
-  const existing = await db
-    .coll(COLLECTIONS.membershipApplications)
-    .where({ userId: ctx.viewer.userId, clubId: DEFAULT_CLUB_ID, status: MEMBER_STATUS.PENDING })
-    .limit(1)
-    .get()
-    .catch(() => ({ data: [] }));
-
-  if (existing.data && existing.data.length > 0) {
-    return { state: MEMBER_STATUS.PENDING, applicationId: existing.data[0]._id };
-  }
-
-  const added = await db.coll(COLLECTIONS.membershipApplications).add({
-    data: {
-      userId: ctx.viewer.userId,
-      clubId: DEFAULT_CLUB_ID,
-      displayName,
-      inviteCode: inviteCode.toUpperCase(),
-      rulesVersion,
-      status: MEMBER_STATUS.PENDING,
-      createdAt: db.serverDate(),
-    },
-  });
-
-  await db.incCounter(COLLECTIONS.inviteCodes, inviteCode.toUpperCase(), 'usedCount', 1);
-
-  return { state: MEMBER_STATUS.PENDING, applicationId: added._id };
 }
 
 /** GET /membership/applications/mine —— 申请状态与理由 */
