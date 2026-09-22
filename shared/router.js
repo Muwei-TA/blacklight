@@ -21,7 +21,7 @@ function createRouter(handlers, { name = 'api' } = {}) {
   return async function main(event = {}, context = {}) {
     const started = Date.now();
     const { action, payload = {} } = event;
-    const requestId = (context && context.requestId) || `${Date.now()}`;
+    const requestId = (context && (context.requestId || context.request_id)) || `${Date.now()}`;
 
     if (!action || typeof action !== 'string') {
       return { code: KIND.INVALID_INPUT, message: '缺少 action', requestId };
@@ -37,10 +37,17 @@ function createRouter(handlers, { name = 'api' } = {}) {
     let ctx;
     try {
       // openid 只能来自云上下文，客户端传入的一律忽略
-      const cloud = require('wx-server-sdk');
+      const cloud = require('./db').getCloud();
       const wxContext = cloud.getWXContext();
-      const openid = wxContext.OPENID || null;
+      let requestEnvironment = {};
+      try { requestEnvironment = JSON.parse(context.environment || '{}'); } catch (_) { /* diagnostic only */ }
+      // SCF reuses processes; trust the current invocation envelope, never a
+      // leftover process.env identity from an earlier wx invocation.
+      const expectedAppId = process.env.MINIPROGRAM_APP_ID || 'wx39773ed34aa30776';
+      const openid = requestEnvironment.WX_OPENID === wxContext.OPENID && requestEnvironment.WX_APPID === expectedAppId
+        ? wxContext.OPENID || null : null;
       ctx = await resolveContext(openid, event.clubId || DEFAULT_CLUB_ID);
+      ctx.identityDiagnostic = { source: wxContext.SOURCE || '', hasOpenid: !!wxContext.OPENID, requestHasOpenid: !!requestEnvironment.WX_OPENID, appidMatches: wxContext.APPID === expectedAppId };
       ctx.requestId = requestId;
       ctx.action = action;
       ctx.now = Date.now();

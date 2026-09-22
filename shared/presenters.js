@@ -127,6 +127,7 @@ function presentPostCard(post, context = {}) {
   const { viewer, authorUser, alias, assets, topic, reacted, bookmarked, now } = context;
   return {
     id: post._id,
+    version: post.version || 1,
     kind: post.kind,
     category: post.category || '',
     categoryText: post.categoryText || '',

@@ -96,3 +96,11 @@ test('decoded input and cleaned output stay within the 2 MiB limit', () => {
   const oversized = Buffer.alloc(MAX_DECODED_BYTES + 1, 0x41);
   expectCode(() => sanitizeImageBase64(oversized.toString('base64')), 'size_limit');
 });
+
+test('large images are reduced within the published moderation envelope', () => {
+  const source = makePng(1500, 1500);
+  const cleaned = sanitizeImageBase64(source.toString('base64'));
+  assert.ok(cleaned.width <= 750 && cleaned.height <= 1334);
+  assert.ok(cleaned.cleanedSize < 1000000);
+  assert.equal(inspectImageBuffer(cleaned.buffer).width, cleaned.width);
+});

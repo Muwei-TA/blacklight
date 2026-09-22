@@ -172,14 +172,31 @@ function sanitizeImageBase64(value, { declaredMimeType = '' } = {}) {
   }
   assertDimensions(pixels.width, pixels.height);
 
-  const encoded = jpeg.encode({
-    data: pixels.data,
-    width: pixels.width,
-    height: pixels.height,
-  }, JPEG_QUALITY).data;
+  // Keep the complete displayed image within the conservative synchronous
+  // moderation envelope. We publish these exact cleaned bytes, never an
+  // unreviewed original or a different high-resolution rendition.
+  const scale = Math.min(1, 750 / pixels.width, 1334 / pixels.height);
+  if (scale < 1) {
+    const width = Math.max(1, Math.floor(pixels.width * scale));
+    const height = Math.max(1, Math.floor(pixels.height * scale));
+    const data = Buffer.alloc(width * height * 4);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const source = (Math.min(pixels.height - 1, Math.floor(y / scale)) * pixels.width + Math.min(pixels.width - 1, Math.floor(x / scale))) * 4;
+        const target = (y * width + x) * 4;
+        for (let channel = 0; channel < 4; channel += 1) data[target + channel] = pixels.data[source + channel];
+      }
+    }
+    pixels = { data, width, height };
+  }
+  const raster = { data: pixels.data, width: pixels.width, height: pixels.height };
+  let encoded = jpeg.encode(raster, JPEG_QUALITY).data;
+  for (let quality = 75; encoded.length >= 1000000 && quality >= 35; quality -= 10) {
+    encoded = jpeg.encode(raster, quality).data;
+  }
   if (!encoded || encoded.length === 0) fail('invalid_image', '图片重新编码失败');
-  if (encoded.length > MAX_DECODED_BYTES) {
-    fail('size_limit', '清洗后的图片不能超过 2MiB', { actualSize: encoded.length, maxSize: MAX_DECODED_BYTES });
+  if (encoded.length >= 1000000) {
+    fail('size_limit', '图片压缩后仍然过大，请选择较小的图片', { actualSize: encoded.length, maxSize: 1000000 });
   }
 
   const cleanedInfo = readJpegInfo(encoded);

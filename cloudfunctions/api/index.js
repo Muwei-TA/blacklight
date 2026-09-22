@@ -18,6 +18,8 @@ const notifications = require('./domain/notifications');
 const search = require('./domain/search');
 const assets = require('./domain/assets');
 const moderation = require('./domain/moderation');
+const governance = require('./domain/governance');
+const operations = require('./domain/operations');
 
 const handlers = {
   // ── 会话与成员资格 ──
@@ -68,17 +70,29 @@ const handlers = {
 
   // ── 媒体 ──
   'assets/intent': assets.createIntent,
+  'assets/upload': assets.uploadImage,
   'assets/confirm': assets.confirmUpload,
   'assets/status': assets.getStatus,
 
   // ── 管理台（服务端按角色鉴权，与前端是否隐藏入口无关）──
   'admin/queue': moderation.listQueue,
   'admin/content/decide': moderation.decideContent,
+  'admin/comment/decide': moderation.decideComment,
   'admin/topic/decide': moderation.decideTopic,
   'admin/membership/decide': moderation.decideMembership,
   'admin/report/decide': moderation.decideReport,
   'admin/collection/decide': moderation.decideCollection,
   'admin/anonymous/reveal': moderation.revealAnonymous,
+  'admin/security/check': operations.securityCheck,
+  'admin/members/list': governance.listMembers,
+  'admin/invites/create': governance.createInvite,
+  'admin/member/remove': governance.removeMember,
+  'admin/member/mute': governance.muteMember,
+  'admin/member/role': governance.changeMemberRole,
+  'appeals/create': governance.createAppeal,
+  'appeals/mine': governance.listMyAppeals,
+  'admin/appeals/list': governance.listAppeals,
+  'admin/appeal/decide': governance.decideAppeal,
 };
 
 exports.main = createRouter(handlers, { name: 'api' });

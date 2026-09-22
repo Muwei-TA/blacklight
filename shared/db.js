@@ -17,6 +17,13 @@ function getCloud() {
   return cloud;
 }
 
+let storage;
+function getStorage() {
+  if (!process.env.CLOUDBASE_APIKEY) throw new Error('Server storage credential unavailable');
+  if (!storage) storage = require('./pg-storage').createPgStorageAdapter();
+  return storage;
+}
+
 function getDb() {
   return require('./pg-store');
 }
@@ -169,6 +176,7 @@ async function incCounter(name, id, field, delta = 1) {
 
 module.exports = {
   getCloud,
+  getStorage,
   getDb,
   command,
   coll,

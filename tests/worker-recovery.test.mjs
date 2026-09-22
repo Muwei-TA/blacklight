@@ -46,6 +46,7 @@ const fakeCloud = {
 };
 
 const fakeDb = {
+  getStorage: () => fakeCloud,
   command() {
     return {
       in: (value) => ({ $in: value }),
@@ -175,7 +176,11 @@ test('worker 不把伪造 Timer event 当作可信来源', () => {
   sourceContext = { SOURCE: 'wx_client' };
   assert.equal(worker._internals.verifyWorkerSource(fakeCloud, { Type: 'Timer', TriggerName: 'review-tick' }).ok, false);
   sourceContext = { SOURCE: 'wx_trigger' };
-  assert.equal(worker._internals.verifyWorkerSource(fakeCloud, { Type: 'forged' }).ok, true);
+  assert.equal(worker._internals.verifyWorkerSource(fakeCloud, { Type: 'forged' }, {}).ok, false);
+  sourceContext = {};
+  assert.equal(worker._internals.verifyWorkerSource(fakeCloud, {}, { TRIGGER_SRC: 'timer' }).ok, true);
+  sourceContext = { OPENID: 'client' };
+  assert.equal(worker._internals.verifyWorkerSource(fakeCloud, {}, { TRIGGER_SRC: 'timer' }).ok, false);
 });
 
 test('回调 trace/version 绑定拒绝旧版本', () => {

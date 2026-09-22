@@ -17,3 +17,7 @@ coverage/
 .nyc_output/
 tmp/
 *.local.json
+
+# Shared reviewer build outputs for authenticated foreground execution
+cloudfunctions/api/tasks/
+cloudfunctions/api/recovery.js

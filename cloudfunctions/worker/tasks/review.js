@@ -30,8 +30,9 @@ async function checkText(content, openid) {
     const chunk = chars.slice(offset, offset + 2500).join('');
     let res;
     try {
-      res = await cloud.openapi({ appid: process.env.WX_APPID }).security.msgSecCheck({ version: 2, openid, scene: 2, content: chunk });
+      res = await cloud.openapi({ appid: process.env.MINIPROGRAM_APP_ID }).security.msgSecCheck({ version: 2, openid, scene: 2, content: chunk });
     } catch (err) {
+      // Upstream messages may echo content or credentials; retain only the code.
       throw new Error(`msgSecCheck failed: ${err.errCode || 'unavailable'}`);
     }
     const { label, suggest } = res.result || {};

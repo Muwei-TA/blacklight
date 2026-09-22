@@ -14,7 +14,7 @@ const { buildViewer, GUEST_VIEWER } = require('./policies');
 
 /** 能力开关默认全关。读取失败时保持关闭（fail-closed）。 */
 const DEFAULT_CAPABILITIES = {
-  publishing: true,
+  publishing: false,
   uploads: false,
   publicScope: false,
   video: false,
@@ -94,6 +94,7 @@ async function resolveContext(openid, clubId = DEFAULT_CLUB_ID) {
     role: membership ? membership.role || ROLE.MEMBER : ROLE.GUEST,
     memberStatus: membership ? membership.status : MEMBER_STATUS.NONE,
     clubId,
+    mutedUntil: membership ? membership.mutedUntil || null : null,
   });
 
   return { viewer, user, membership, club, capabilities };

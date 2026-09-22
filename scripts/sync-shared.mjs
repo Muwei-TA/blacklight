@@ -42,3 +42,10 @@ for (const fn of functions) {
 
 console.log(`\n完成：${functions.length} 个云函数，共复制 ${copied} 个文件`);
 console.log('提醒：cloudfunctions/*/shared/ 已在 .gitignore 中忽略，请勿手动编辑副本。');
+
+// Reuse the same review implementations for authenticated foreground requests
+// and the timer worker; no divergent safety checks between the two runtimes.
+const apiTasks = join(FUNCTIONS_DIR, 'api', 'tasks');
+mkdirSync(apiTasks, { recursive: true });
+for (const file of ['review.js', 'media.js']) copyFileSync(join(FUNCTIONS_DIR, 'worker', 'tasks', file), join(apiTasks, file));
+copyFileSync(join(FUNCTIONS_DIR, 'worker', 'recovery.js'), join(FUNCTIONS_DIR, 'api', 'recovery.js'));

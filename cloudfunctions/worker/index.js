@@ -23,7 +23,6 @@ const recovery = require('./recovery');
 const MAX_ATTEMPTS = 5;
 const BATCH_SIZE = 10;
 const LEASE_MS = recovery.DEFAULT_LEASE_MS;
-const TIMER_SOURCE = 'wx_trigger';
 
 function readWXContext(cloud) {
   try {
@@ -35,15 +34,16 @@ function readWXContext(cloud) {
 
 /**
  * Timer/console event fields are input data and are never an authentication
- * signal.  SOURCE comes from wx-server-sdk's invocation context; the actual
+ * signal.  TRIGGER_SRC is injected by the SCF runtime (verified timer='timer'); the actual
  * cloud function invocation permission still needs to be restricted in the
  * CloudBase console and is recorded as an untested deployment boundary.
  */
-function verifyWorkerSource(cloud, event = {}) {
+function verifyWorkerSource(cloud, event = {}, runtime = process.env) {
   const wxContext = readWXContext(cloud);
   const source = wxContext.SOURCE || '';
   return {
-    ok: source === TIMER_SOURCE,
+    ok: runtime.TRIGGER_SRC === 'timer' && !wxContext.OPENID,
+    triggerSource: runtime.TRIGGER_SRC || '',
     source,
     hasOpenId: !!wxContext.OPENID,
     eventType: typeof event.Type === 'string' ? event.Type : '',
@@ -56,7 +56,7 @@ function taskLeaseCondition(task, now, _) {
   const condition = { _id: task._id, status: task.status };
   const attempts = Number(task.attempts);
   if (Number.isFinite(attempts)) {
-    condition.attempts = task.status === REVIEW_TASK_STATUS.RUNNING && attempts >= MAX_ATTEMPTS
+    condition.attempts = attempts >= MAX_ATTEMPTS
       ? _.gte(MAX_ATTEMPTS)
       : _.lt(MAX_ATTEMPTS);
   }
@@ -95,7 +95,7 @@ function taskLeaseCondition(task, now, _) {
 function taskOwnerCondition(task) {
   return {
     _id: task._id,
-    status: REVIEW_TASK_STATUS.RUNNING,
+    status: task.status || REVIEW_TASK_STATUS.RUNNING,
     leaseId: task.leaseId,
   };
 }
@@ -137,16 +137,23 @@ async function claimTasks(limit = BATCH_SIZE, {
   const _ = db.command();
   const res = await db
     .coll(COLLECTIONS.reviewTasks)
-    .where({ status: _.in([REVIEW_TASK_STATUS.QUEUED, REVIEW_TASK_STATUS.RUNNING]) })
+    .where({ $or: [
+      { status: REVIEW_TASK_STATUS.QUEUED, $or: [
+        { nextAttemptAt: _.exists(false) }, { nextAttemptAt: null }, { nextAttemptAt: _.lte(new Date(now)) },
+      ] },
+      { status: REVIEW_TASK_STATUS.RUNNING, $or: [
+        { leaseExpiresAt: _.lte(new Date(now)) },
+        { leaseExpiresAt: null, claimedAt: _.lte(new Date(now - LEASE_MS)) },
+        { leaseExpiresAt: _.exists(false), claimedAt: _.lte(new Date(now - LEASE_MS)) },
+        { leaseExpiresAt: null, claimedAt: null },
+      ] },
+    ] })
     .orderBy('createdAt', 'asc')
-    // Read a little more than the requested batch because deferred queued
-    // tasks and live running leases may be ahead of work that is actually due.
-    .limit(Math.max(limit * 4, limit))
+    .limit(limit)
     .get();
 
   const tasks = (res.data || []).filter((task) => {
-    const attempts = Number(task.attempts) || 0;
-    if (task.status === REVIEW_TASK_STATUS.QUEUED) return attempts < MAX_ATTEMPTS && recovery.isTaskDue(task, now);
+    if (task.status === REVIEW_TASK_STATUS.QUEUED) return recovery.isTaskDue(task, now);
     return recovery.isLeaseExpired(task, now, LEASE_MS);
   });
   const claimed = [];
@@ -221,7 +228,10 @@ exports.main = async (event = {}, context = {}) => {
     return { code: 'forbidden' };
   }
   console.log('[worker] invocation source accepted', {
+    configuredAppId: !!process.env.MINIPROGRAM_APP_ID,
+    configuredAppIdLength: (process.env.MINIPROGRAM_APP_ID || '').length,
     source: source.source,
+    triggerSource: source.triggerSource,
     eventType: source.eventType,
     triggerName: source.triggerName,
     cloudPermissionVerified: false,
@@ -311,6 +321,7 @@ exports.main = async (event = {}, context = {}) => {
     await cleanupTasks.processAccountDeletions().catch((err) => console.error('[worker] deletion', err.message));
   }
 
+  await db.coll(COLLECTIONS.clubConfig).doc('heiguang').update({ data: { workerLastRunAt: db.serverDate(), workerSummary: summary } });
   console.log('[worker] summary', summary);
   return { code: 0, data: summary };
 };

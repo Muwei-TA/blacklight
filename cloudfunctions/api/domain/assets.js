@@ -8,7 +8,7 @@
  */
 
 const crypto = require('node:crypto');
-const { COLLECTIONS, ASSET_STATUS, REVIEW_TASK_STATUS } = require('../shared/constants');
+const { COLLECTIONS, ASSET_STATUS } = require('../shared/constants');
 const policies = require('../shared/policies');
 const validators = require('../shared/validators');
 const errors = require('../shared/errors');
@@ -36,17 +36,6 @@ function nowMillis() {
   return Date.now();
 }
 
-function readIdempotencyKey(payload) {
-  if (payload.idempotencyKey === undefined || payload.idempotencyKey === '') return '';
-  return validators.requireString(payload.idempotencyKey, '请求标识', { max: 120 });
-}
-
-function toMillis(value) {
-  if (value instanceof Date) return value.getTime();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function ensureImageIntentPayload(payload) {
   if (payload.mediaType !== 'image') {
     throw errors.forbidden({ reason: 'only jpeg/png image uploads are enabled' });
@@ -62,75 +51,30 @@ function ensureImageIntentPayload(payload) {
   return { ...input, mimeType };
 }
 
-async function loadOwnerQuota(ownerId) {
-  const res = await db
-    .coll(COLLECTIONS.assets)
-    .where({ ownerId, mediaType: 'image' })
-    // The daily byte quota counts failed attempts too. Keep enough history to
-    // cover the quota boundary instead of allowing many tiny requests to hide
-    // behind the repository's default 100-row limit.
-    .limit(10000)
-    .get();
-  const now = nowMillis();
-  const cutoff = now - 24 * 60 * 60 * 1000;
-  let pending = 0;
-  let dailyBytes = 0;
-  for (const asset of res.data || []) {
-    const createdAt = toMillis(asset.createdAt);
-    if (createdAt >= cutoff) dailyBytes += Number(asset.declaredSize) || 0;
-    if (asset.status === ASSET_STATUS.INTENT && toMillis(asset.expiresAt) > now) pending += 1;
+async function imageRpc(name, args) {
+  try { return await db.getDb().rpc(name, args); } catch (err) {
+    if (/IMAGE_EXPIRED/.test(err.message)) throw errors.invalidInput('上传已过期，请重新选择图片', { code: 'image_expired' });
+    if (/IMAGE_QUOTA/.test(err.message)) throw errors.rateLimited({ reason: 'image quota reached' });
+    if (/IMAGE_NOT_FOUND/.test(err.message)) throw errors.notAccessible();
+    if (/IMAGE_/.test(err.message)) throw errors.conflict('图片状态已变化或请求处理中，请稍后重试');
+    throw err;
   }
-  return { pending, dailyBytes };
 }
-
 async function createIntent(payload, ctx) {
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
-  if (ctx.capabilities.uploads !== true) throw errors.forbidden({ reason: 'uploads disabled until media validation' });
-
+  if (!policies.canUseUploads(ctx.viewer, ctx.capabilities)) throw errors.forbidden();
   const input = ensureImageIntentPayload(payload);
-  const quota = await loadOwnerQuota(ctx.viewer.userId);
-  if (quota.pending >= MAX_PENDING_INTENTS || quota.dailyBytes + input.size > DAILY_IMAGE_QUOTA_BYTES) {
-    throw errors.rateLimited({ reason: 'image upload quota exceeded' });
-  }
-
-  const idempotencyKey = readIdempotencyKey(payload);
-  const claim = await db.claimIdempotency(idempotencyKey, ctx.viewer.userId, 'createImageIntent');
-  if (!claim.isNew) {
-    if (claim.result) return claim.result;
-    throw errors.conflict('请求正在处理中，请稍后重试');
-  }
-
+  const key = validators.requireString(payload.idempotencyKey, '请求标识', { min: 8, max: 120 });
   const assetId = crypto.randomUUID();
-  const uploadAttemptId = crypto.randomUUID();
-  const expiresAt = new Date(nowMillis() + INTENT_TTL_MS).toISOString();
-  await db.coll(COLLECTIONS.assets).add({
-    data: {
-      _id: assetId,
-      ownerId: ctx.viewer.userId,
-      mediaType: 'image',
-      declaredSize: input.size,
-      declaredDuration: 0,
-      mimeType: input.mimeType,
-      status: ASSET_STATUS.INTENT,
-      postId: '',
-      postVersion: 0,
-      fileId: '',
-      cleanedFileId: '',
-      cloudPath: '',
-      uploadAttemptId,
-      uploadStartedAt: null,
-      expiresAt,
-      reviewTaskId: '',
-      tempFileURL: '',
-      coverURL: '',
-      createdAt: db.serverDate(),
-      updatedAt: db.serverDate(),
-    },
-  });
-
-  const result = { assetId, expiresAt, expiresInSeconds: Math.floor(INTENT_TTL_MS / 1000), mediaType: 'image' };
-  await db.completeIdempotency(idempotencyKey, ctx.viewer.userId, 'createImageIntent', result);
-  return result;
+  const createdAt = db.serverDate();
+  const asset = {
+    _id: assetId, ownerId: ctx.viewer.userId, mediaType: 'image', declaredSize: input.size,
+    quotaBytes: MAX_DECODED_BYTES, declaredDuration: 0, mimeType: input.mimeType,
+    status: ASSET_STATUS.INTENT, postId: '', postVersion: 0, fileId: '', cleanedFileId: '',
+    cloudPath: buildStoragePath(), expiresAt: new Date(nowMillis()+INTENT_TTL_MS).toISOString(),
+    reviewTaskId: '', tempFileURL: '', coverURL: '', createdAt, updatedAt: createdAt,
+  };
+  return imageRpc('hg_image_intent', { p_owner: ctx.viewer.userId, p_key: key, p_asset: asset });
 }
 
 async function findOwnedIntent(assetId, ctx) {
@@ -141,199 +85,57 @@ async function findOwnedIntent(assetId, ctx) {
   return asset;
 }
 
-function ensureIntentIsUsable(asset) {
-  if (asset.status !== ASSET_STATUS.INTENT) throw errors.conflict('上传意图已经使用或已失效');
-  if (asset.uploadStartedAt) throw errors.conflict('上传意图已经开始处理，不能重复使用');
-  if (!asset.expiresAt || toMillis(asset.expiresAt) <= nowMillis()) throw errors.conflict('上传意图已过期，请重新申请');
-}
-
-async function markUploadRejected(asset, reason) {
-  await db
-    .coll(COLLECTIONS.assets)
-    .where({ _id: asset._id, status: ASSET_STATUS.INTENT, uploadAttemptId: asset.uploadAttemptId })
-    .update({ data: { status: ASSET_STATUS.REJECTED, failureReason: reason, updatedAt: db.serverDate() } })
-    .catch(() => {});
-}
-
-/** POST /assets/upload —— 受控接收 base64，客户端永远不能指定 fileId。 */
+/** Controlled bytes upload. The reserved random object path is persisted before
+ * storage writes, so process loss never leaves an untracked object. A retry
+ * after lease expiry must use identical bytes; published objects cannot change.
+ */
 async function uploadImage(payload, ctx) {
-  if (!ctx.viewer.isMember) throw errors.membershipInvalid();
-  if (ctx.capabilities.uploads !== true) throw errors.forbidden({ reason: 'uploads disabled until media validation' });
-
-  const idempotencyKey = readIdempotencyKey(payload);
+  if (!policies.canUseUploads(ctx.viewer, ctx.capabilities)) throw errors.forbidden();
   const assetId = validators.requireId(payload.assetId, 'assetId');
+  const key = validators.requireString(payload.idempotencyKey, '请求标识', { min: 8, max: 120 });
   const asset = await findOwnedIntent(assetId, ctx);
-  if (asset.status === ASSET_STATUS.INTENT) ensureIntentIsUsable(asset);
-  else if (asset.status !== ASSET_STATUS.UPLOADED || !asset.fileId) throw errors.conflict('上传意图已经使用或已失效');
-  const claim = await db.claimIdempotency(idempotencyKey, ctx.viewer.userId, 'uploadImage');
-  if (!claim.isNew) {
-    if (claim.result) {
-      if (claim.result.assetId && claim.result.assetId !== assetId) {
-        throw errors.conflict('请求标识已用于其他资产');
-      }
-      return claim.result;
-    }
-    if (asset.status === ASSET_STATUS.UPLOADED && asset.fileId) {
-      const result = {
-        assetId,
-        status: ASSET_STATUS.UPLOADED,
-        width: asset.width || 0,
-        height: asset.height || 0,
-        actualSize: asset.actualSize || 0,
-        cleanedSize: asset.cleanedSize || 0,
-      };
-      await db.completeIdempotency(idempotencyKey, ctx.viewer.userId, 'uploadImage', result);
-      return result;
-    }
-    throw errors.conflict('上传请求正在处理中，请稍后重试');
-  }
-  if (asset.status === ASSET_STATUS.UPLOADED && asset.fileId) {
-    const result = {
-      assetId,
-      status: ASSET_STATUS.UPLOADED,
-      width: asset.width || 0,
-      height: asset.height || 0,
-      actualSize: asset.actualSize || 0,
-      cleanedSize: asset.cleanedSize || 0,
-    };
-    await db.completeIdempotency(idempotencyKey, ctx.viewer.userId, 'uploadImage', result);
-    return result;
-  }
-
-  const _ = db.command();
-  const claimed = await db
-    .coll(COLLECTIONS.assets)
-    .where({
-      _id: asset._id,
-      ownerId: ctx.viewer.userId,
-      status: ASSET_STATUS.INTENT,
-      uploadStartedAt: _.eq(null),
-    })
-    .update({ data: { uploadStartedAt: db.serverDate(), updatedAt: db.serverDate() } });
-  if (!claimed.stats || claimed.stats.updated !== 1) throw errors.conflict('上传意图已经开始处理，不能重复使用');
-
   let cleaned;
-  try {
-    cleaned = sanitizeImageBase64(payload.contentBase64, { declaredMimeType: asset.mimeType });
-  } catch (err) {
-    await markUploadRejected(asset, err instanceof ImageProcessingError ? err.message : '图片无法处理');
-    if (err instanceof ImageProcessingError) {
-      throw errors.invalidInput(err.message, { code: err.code });
-    }
-    throw err;
-  }
-
-  const cloud = db.getCloud();
-  const cloudPath = buildStoragePath();
-  let uploaded;
-  try {
-    uploaded = await cloud.uploadFile({ cloudPath, fileContent: cleaned.buffer });
-  } catch (err) {
-    await markUploadRejected(asset, '图片存储失败');
-    throw err;
-  }
+  try { cleaned = sanitizeImageBase64(payload.contentBase64, { declaredMimeType: asset.mimeType }); }
+  catch (err) { if (err instanceof ImageProcessingError) throw errors.invalidInput(err.message, { code: err.code }); throw err; }
+  if (cleaned.actualSize !== asset.declaredSize) throw errors.invalidInput('图片大小与上传意图不一致');
+  const hash = crypto.createHash('sha256').update(cleaned.buffer).digest('hex');
+  const claimId = crypto.randomUUID();
+  const reserved = await imageRpc('hg_claim_image', { p_owner: ctx.viewer.userId, p_asset_id: assetId, p_key: key, p_hash: hash, p_claim: claimId });
+  const toResult = (a) => ({ assetId, status: a.status, width: a.width || 0, height: a.height || 0, actualSize: a.actualSize || 0, cleanedSize: a.cleanedSize || 0 });
+  if (reserved.fileId && reserved.status !== ASSET_STATUS.INTENT) return toResult(reserved);
+  const cloud = db.getStorage();
+  // Persist the storage-assigned identifier before sending bytes. If the
+  // process dies after upload, cleanup can still delete the reserved object.
+  const storage = cloud;
+  const metadata = await storage.getUploadMetadata({ cloudPath: reserved.cloudPath });
+  const reservedFileId = metadata && metadata.data && metadata.data.fileId;
+  if (!reservedFileId) throw new Error('storage reservation failed');
+  const tracked = await db.coll(COLLECTIONS.assets).where({ _id: assetId, status: ASSET_STATUS.INTENT, uploadClaim: claimId }).update({ data: { reservedFileId } });
+  if (!tracked.stats || tracked.stats.updated !== 1) throw errors.conflict('上传租约已更新');
+  const uploaded = await cloud.uploadFile({ cloudPath: reserved.cloudPath, fileContent: cleaned.buffer });
   const fileId = uploaded && (uploaded.fileID || uploaded.fileId);
-  if (!fileId) {
-    await markUploadRejected(asset, '图片存储未返回文件标识');
-    throw new Error('controlled image upload returned no file id');
-  }
-
-  const updated = await db
-    .coll(COLLECTIONS.assets)
-    .where({ _id: asset._id, ownerId: ctx.viewer.userId, status: ASSET_STATUS.INTENT, uploadAttemptId: asset.uploadAttemptId })
-    .update({
-      data: {
-        status: ASSET_STATUS.UPLOADED,
-        fileId,
-        cleanedFileId: fileId,
-        cloudPath: '',
-        actualSize: cleaned.actualSize,
-        cleanedSize: cleaned.cleanedSize,
-        width: cleaned.width,
-        height: cleaned.height,
-        sourceMimeType: cleaned.sourceMimeType,
-        mimeType: JPEG_MIME,
-        cleanedAt: db.serverDate(),
-        updatedAt: db.serverDate(),
-      },
-    });
-  if (!updated.stats || updated.stats.updated !== 1) {
-    await cloud.deleteFile({ fileList: [fileId] }).catch(() => {});
-    throw new Error('asset changed before controlled upload binding');
-  }
-
-  const result = {
-    assetId,
-    status: ASSET_STATUS.UPLOADED,
-    width: cleaned.width,
-    height: cleaned.height,
-    actualSize: cleaned.actualSize,
-    cleanedSize: cleaned.cleanedSize,
+  if (!fileId) throw new Error('storage returned no file identifier');
+  const data = {
+    status: ASSET_STATUS.UPLOADED, fileId, cleanedFileId: fileId,
+    actualSize: cleaned.actualSize, cleanedSize: cleaned.cleanedSize,
+    quotaBytes: Math.max(cleaned.actualSize, cleaned.cleanedSize),
+    width: cleaned.width, height: cleaned.height, sourceMimeType: cleaned.sourceMimeType,
+    cleanedMimeType: JPEG_MIME, cleanedAt: db.serverDate(), updatedAt: db.serverDate(),
+    uploadLeaseUntil: null,
   };
-  await db.completeIdempotency(idempotencyKey, ctx.viewer.userId, 'uploadImage', result);
-  return result;
+  const updated = await db.coll(COLLECTIONS.assets).where({ _id: assetId, ownerId: ctx.viewer.userId, status: ASSET_STATUS.INTENT, uploadClaim: claimId }).update({ data });
+  if (!updated.stats || updated.stats.updated !== 1) throw errors.conflict('上传租约已更新，请使用同一图片重试');
+  return toResult(data);
 }
 
-/** POST /assets/confirm —— 只确认服务端已绑定的上传，不接受外来 fileId。 */
 async function confirmUpload(payload, ctx) {
-  if (!ctx.viewer.isMember) throw errors.membershipInvalid();
-  if (ctx.capabilities.uploads !== true) throw errors.forbidden({ reason: 'uploads disabled until media validation' });
+  if (!policies.canUseUploads(ctx.viewer, ctx.capabilities)) throw errors.forbidden();
   if (payload.fileId) throw errors.invalidInput('客户端不能提交 fileId', { field: 'fileId' });
-
-  const idempotencyKey = readIdempotencyKey(payload);
   const assetId = validators.requireId(payload.assetId, 'assetId');
-  const asset = await findOwnedIntent(assetId, ctx);
-  const claim = await db.claimIdempotency(idempotencyKey, ctx.viewer.userId, 'confirmImageUpload');
-  if (!claim.isNew) {
-    if (claim.result) {
-      if (claim.result.assetId && claim.result.assetId !== assetId) {
-        throw errors.conflict('请求标识已用于其他资产');
-      }
-      return claim.result;
-    }
-    if (asset.reviewTaskId) {
-      const result = { assetId, status: asset.status };
-      await db.completeIdempotency(idempotencyKey, ctx.viewer.userId, 'confirmImageUpload', result);
-      return result;
-    }
-    throw errors.conflict('确认请求正在处理中，请稍后重试');
-  }
-  if (asset.status !== ASSET_STATUS.UPLOADED || !asset.fileId) {
-    if (asset.reviewTaskId) {
-      const result = { assetId, status: asset.status };
-      await db.completeIdempotency(idempotencyKey, ctx.viewer.userId, 'confirmImageUpload', result);
-      return result;
-    }
-    throw errors.conflict('请先完成受控图片上传');
-  }
-  if (asset.reviewTaskId) {
-    const result = { assetId, status: asset.status };
-    await db.completeIdempotency(idempotencyKey, ctx.viewer.userId, 'confirmImageUpload', result);
-    return result;
-  }
-
-  const taskId = `asset-review:${assetId}`;
-  await db
-    .coll(COLLECTIONS.reviewTasks)
-    .add({
-      data: {
-        _id: taskId,
-        targetType: 'asset',
-        targetId: assetId,
-        mediaType: 'image',
-        status: REVIEW_TASK_STATUS.QUEUED,
-        attempts: 0,
-        needsMedia: true,
-        createdAt: db.serverDate(),
-      },
-    })
-    .catch((err) => {
-      if (!/23505|duplicate|exists/i.test(String(err.code || err.message))) throw err;
-    });
-  await db.coll(COLLECTIONS.assets).doc(assetId).update({ data: { reviewTaskId: taskId, updatedAt: db.serverDate() } });
-  const result = { assetId, status: ASSET_STATUS.UPLOADED };
-  await db.completeIdempotency(idempotencyKey, ctx.viewer.userId, 'confirmImageUpload', result);
-  return result;
+  await imageRpc('hg_confirm_image', { p_owner: ctx.viewer.userId, p_asset_id: assetId });
+  await require('./foreground-review').runOwnedReview('asset', assetId, ctx).catch(() => null);
+  const current = await findOwnedIntent(assetId, ctx);
+  return { assetId, status: current.status };
 }
 
 async function canReadAsset(asset, ctx) {
@@ -345,7 +147,7 @@ async function canReadAsset(asset, ctx) {
 
 async function authorizedUrl(asset) {
   if (asset.status !== ASSET_STATUS.VERIFIED || !asset.fileId) return '';
-  const cloud = db.getCloud();
+  const cloud = db.getStorage();
   const result = await cloud.getTempFileURL({ fileList: [asset.fileId] }).catch(() => null);
   const file = result && result.fileList && result.fileList[0];
   return file && Number(file.status) === 0 ? file.tempFileURL || '' : '';
@@ -369,7 +171,16 @@ async function getStatus(payload, ctx) {
   };
 }
 
+async function signReadableAssets(assets, posts, ctx) {
+  const allowed = new Map(posts.filter((p) => policies.canReadPost(ctx.viewer, p)).map((p) => [p._id, p]));
+  return Promise.all(assets.map(async (asset) => ({
+    ...asset, tempFileURL: allowed.has(asset.postId) && (allowed.get(asset.postId).assetIds || []).includes(asset._id)
+      ? await authorizedUrl(asset) : '', coverURL: '',
+  })));
+}
+
 module.exports = {
+  signReadableAssets,
   MAX_PENDING_INTENTS,
   DAILY_IMAGE_QUOTA_BYTES,
   buildStoragePath,
@@ -377,7 +188,6 @@ module.exports = {
   uploadImage,
   confirmUpload,
   getStatus,
-  loadOwnerQuota,
   canReadAsset,
   authorizedUrl,
 };

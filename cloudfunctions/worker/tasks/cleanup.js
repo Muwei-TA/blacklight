@@ -8,7 +8,6 @@
  * - 注销申请：停止展示后按保留期清理，任何一步失败都保留可重试状态
  */
 
-const cloud = require('wx-server-sdk');
 const { COLLECTIONS, ASSET_STATUS, POST_STATUS } = require('../shared/constants');
 const db = require('../shared/db');
 const recovery = require('../recovery');
@@ -41,7 +40,7 @@ async function deleteFiles(fileIds) {
 
   let response;
   try {
-    response = await cloud.deleteFile({ fileList: unique });
+    response = await db.getStorage().deleteFile({ fileList: unique });
   } catch (err) {
     return {
       deleted: [],
@@ -233,6 +232,9 @@ async function cleanupDeletedPostAssets() {
       .update({
         data: {
           fileId: '',
+          cleanedFileId: '',
+          reservedFileId: '',
+          cloudPath: '',
           tempFileURL: '',
           status: 'purged',
           cleanupState: 'done',

@@ -23,7 +23,7 @@ const presenters = require('../shared/presenters');
 const errors = require('../shared/errors');
 const db = require('../shared/db');
 
-const QUEUES = ['content', 'topic', 'member', 'report', 'collection'];
+const QUEUES = ['comment', 'content', 'topic', 'member', 'report', 'collection'];
 
 function requiredExpectedVersion(payload) {
   const version = Number(payload.expectedVersion);
@@ -35,6 +35,7 @@ function requiredExpectedVersion(payload) {
 
 function mapModerationError(error) {
   const marker = `${error && error.code ? error.code : ''} ${error && error.message ? error.message : ''}`;
+  if (/PENDING_MEDIA/.test(marker)) return errors.pendingMedia();
   if (/VERSION_CONFLICT|IDEMPOTENCY_CONFLICT|ALREADY_DECIDED|MEMBERSHIP_EXISTS|CONFLICT/.test(marker)) {
     return errors.conflict('条目已被更新，请刷新后重试', { field: 'expectedVersion' });
   }
@@ -104,6 +105,17 @@ async function listQueue(payload, ctx) {
       })),
       nextCursor: hasMore && items.length > 0 ? validators.buildCursor(items[items.length - 1]) : null,
     };
+  }
+
+  if (queue === 'comment') {
+    const rows = await db.getDb().rpc('hg_comment_queue', { p_actor: ctx.viewer.userId, p_cursor: cursor || null, p_limit: pageSize + 1 });
+    const items = rows.slice(0, pageSize);
+    return { items: items.map((comment) => ({
+      id: comment._id, queue, title: '回应', summary: comment.body || '',
+      postId: comment.postId, version: comment.version || 1,
+      isAnonymous: comment.identityMode === 'anonymous',
+      submittedAtText: presenters.formatRelativeTime(comment.createdAt, ctx.now), statusText: '等待审核',
+    })), nextCursor: rows.length > pageSize ? validators.buildCursor(items[items.length-1]) : null };
   }
 
   if (queue === 'topic') {

@@ -24,12 +24,12 @@ const {
 /** 服务端复核真实文件属性：客户端声明的 size/duration 不可信 */
 async function verifyFileMetadata(asset) {
   if (!asset.fileId) throw new Error('asset has no bound file');
-  const res = await cloud.getTempFileURL({ fileList: [asset.fileId] });
+  const res = await db.getStorage().getTempFileURL({ fileList: [asset.fileId] });
   const file = res.fileList && res.fileList[0];
   if (!file || file.status !== 0) throw new Error('getTempFileURL failed');
 
   // 通过 downloadFile 读取真实字节数
-  const downloaded = await cloud.downloadFile({ fileID: asset.fileId });
+  const downloaded = await db.getStorage().downloadFile({ fileID: asset.fileId });
   const actualSize = downloaded.fileContent ? downloaded.fileContent.length : 0;
 
   const limit = asset.mediaType === 'video' ? CONTENT_LIMITS.videoSize : MAX_DECODED_BYTES;
@@ -67,33 +67,14 @@ async function verifyFileMetadata(asset) {
 /** 图片内容检查：同步返回，可直接闭环 */
 async function checkImage(buffer) {
   try {
-    await cloud.openapi.security.imgSecCheck({
+    await cloud.openapi({ appid: process.env.MINIPROGRAM_APP_ID }).security.imgSecCheck({
       media: { contentType: JPEG_MIME, value: buffer },
     });
     return { pass: true };
   } catch (err) {
     // 87014 = 内容含违规信息
     if (Number(err.errCode) === 87014) return { pass: false, label: 'risky' };
-    throw new Error(`imgSecCheck failed: ${err.errCode || ''} ${err.message}`);
-  }
-}
-
-/**
- * 视频内容检查：异步提交，结果由 review-callback 接收。
- * 提交成功后 asset 停在 verifying，绝不提前置为 verified。
- */
-async function submitVideoCheck(asset, tempFileURL, openid) {
-  try {
-    const res = await cloud.openapi.security.mediaCheckAsync({
-      mediaUrl: tempFileURL,
-      mediaType: 2, // 2 = 视频
-      version: 2,
-      openid,
-      scene: 2,
-    });
-    return { traceId: res.traceId || '' };
-  } catch (err) {
-    throw new Error(`mediaCheckAsync failed: ${err.errCode || ''} ${err.message}`);
+    throw new Error(`imgSecCheck failed: ${err.errCode || ''}`);
   }
 }
 
@@ -102,6 +83,9 @@ async function processAsset(task) {
   if (!asset) return { status: REVIEW_TASK_STATUS.PASSED, note: 'asset gone' };
   if (asset.status === ASSET_STATUS.VERIFIED || asset.status === ASSET_STATUS.REJECTED) {
     return { status: REVIEW_TASK_STATUS.PASSED, note: `already ${asset.status}` };
+  }
+  if (['revoked', 'purged'].includes(asset.status) || asset.cleanupState === 'running') {
+    return { status: REVIEW_TASK_STATUS.PASSED, note: 'asset unavailable' };
   }
   if (asset.mediaType !== 'image') {
     await markRejected(asset, '视频上传能力已关闭');
@@ -138,10 +122,10 @@ async function processAsset(task) {
       return { status: REVIEW_TASK_STATUS.FAILED, note: 'image blocked' };
     }
 
-    await db.coll(COLLECTIONS.assets).doc(asset._id).update({
+    await db.coll(COLLECTIONS.assets).where({ _id: asset._id, status: asset.status, fileId: asset.fileId }).update({
       data: {
         status: ASSET_STATUS.VERIFIED,
-        tempFileURL: meta.tempFileURL,
+        tempFileURL: '',
         actualSize: meta.actualSize,
         width: meta.width,
         height: meta.height,
@@ -159,7 +143,7 @@ async function processAsset(task) {
 }
 
 async function markRejected(asset, reason) {
-  await db.coll(COLLECTIONS.assets).doc(asset._id).update({
+  await db.coll(COLLECTIONS.assets).where({ _id: asset._id, status: asset.status, fileId: asset.fileId }).update({
     data: {
       status: ASSET_STATUS.REJECTED,
       failureReason: reason,
@@ -169,4 +153,4 @@ async function markRejected(asset, reason) {
   });
 }
 
-module.exports = { processAsset, checkImage, submitVideoCheck, verifyFileMetadata, markRejected };
+module.exports = { processAsset, checkImage, verifyFileMetadata, markRejected };

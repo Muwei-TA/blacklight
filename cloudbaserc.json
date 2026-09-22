@@ -6,45 +6,51 @@
   "functions": [
     {
       "name": "api",
-      "timeout": 15,
-      "runtime": "Nodejs16.13",
+      "timeout": 30,
+      "runtime": "Nodejs20.19",
       "memorySize": 256,
       "handler": "index.main",
       "installDependency": true,
       "envVariables": {
         "ANON_ALIAS_SECRET": "{{env.ANON_ALIAS_SECRET}}",
-        "NODE_ENV": "production"
+        "NODE_ENV": "production",
+        "CLOUDBASE_APIKEY": "{{env.CLOUDBASE_APIKEY}}",
+        "MINIPROGRAM_APP_ID": "{{env.MINIPROGRAM_APP_ID}}"
       }
     },
     {
       "name": "worker",
       "timeout": 60,
-      "runtime": "Nodejs16.13",
+      "runtime": "Nodejs20.19",
       "memorySize": 512,
       "handler": "index.main",
       "installDependency": true,
       "envVariables": {
         "ANON_ALIAS_SECRET": "{{env.ANON_ALIAS_SECRET}}",
-        "NODE_ENV": "production"
+        "NODE_ENV": "production",
+        "CLOUDBASE_APIKEY": "{{env.CLOUDBASE_APIKEY}}",
+        "MINIPROGRAM_APP_ID": "{{env.MINIPROGRAM_APP_ID}}"
       },
       "triggers": [
         {
-          "name": "review-tick",
+          "name": "blacklight-review-minute",
           "type": "timer",
-          "config": "0 * * * * * *"
+          "config": "0 */1 * * * * *"
         }
       ]
     },
     {
       "name": "review-callback",
       "timeout": 20,
-      "runtime": "Nodejs16.13",
+      "runtime": "Nodejs20.19",
       "memorySize": 256,
       "handler": "index.main",
       "installDependency": true,
       "envVariables": {
         "REVIEW_CALLBACK_SECRET": "{{env.REVIEW_CALLBACK_SECRET}}",
-        "NODE_ENV": "production"
+        "NODE_ENV": "production",
+        "CLOUDBASE_APIKEY": "{{env.CLOUDBASE_APIKEY}}",
+        "MINIPROGRAM_APP_ID": "{{env.MINIPROGRAM_APP_ID}}"
       }
     }
   ]

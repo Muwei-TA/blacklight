@@ -58,6 +58,8 @@ function isOwner(viewer, post) {
  */
 function canReadPost(viewer, post) {
   if (!post) return false;
+  // Private content never acquires an administrator exception, including hidden records.
+  if (post.visibility === VISIBILITY.PRIVATE && !isOwner(viewer, post)) return false;
 
   // 已删除 / 已隐藏 / 已被新版本取代：一律不可读（作者也看不到旧版本正文）
   if (

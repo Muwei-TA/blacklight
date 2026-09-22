@@ -338,3 +338,9 @@ test('viewer 标记由服务端计算，作者与他人不同', () => {
   assert.equal(otherFlags.canDelete, false);
   assert.equal(otherFlags.canReport, true);
 });
+
+test('hidden private notes remain inaccessible to admins', () => {
+  const post = makePost({ visibility: VISIBILITY.PRIVATE, status: POST_STATUS.HIDDEN });
+  assert.equal(policies.canReadPost(admin, post), false);
+  assert.equal(policies.canReadPost(moderator, post), false);
+});

@@ -1,7 +1,7 @@
 -- Atomic moderation decisions for all management queues.
 --
 -- The API passes only the action payload and the trusted actor id from the
--- server session.  This SECURITY DEFINER function re-checks the actor, locks
+-- server session.  This SECURITY INVOKER function re-checks the actor, locks
 -- every target, applies the expected-version CAS, writes the audit/notification
 -- side effects, and commits them together.  A retry with the same target
 -- version and decision returns the stored result; a different decision is a
@@ -13,7 +13,7 @@ CREATE OR REPLACE FUNCTION public.hg_moderate(
   p_input jsonb DEFAULT '{}'::jsonb
 ) RETURNS jsonb
 LANGUAGE plpgsql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
@@ -85,6 +85,7 @@ BEGIN
       RAISE EXCEPTION 'VERSION_CONFLICT';
     END IF;
     IF post->>'status' <> 'pending' THEN RAISE EXCEPTION 'VERSION_CONFLICT'; END IF;
+    IF decision='approve' AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(coalesce(post->'assetIds','[]'::jsonb)) aid LEFT JOIN hg_assets a ON a.id=aid WHERE a.id IS NULL OR a.doc->>'status'<>'verified' OR a.doc->>'postId'<>target_key OR a.doc->>'ownerId'<>post->>'ownerId') THEN RAISE EXCEPTION 'PENDING_MEDIA'; END IF;
 
     updated := post || jsonb_build_object(
       'status', CASE decision WHEN 'approve' THEN 'published' WHEN 'reject' THEN 'rejected' ELSE 'hidden' END,

@@ -57,6 +57,8 @@ if (problems > 0) process.exit(1);
 console.log('\n[3/4] 请确认云函数环境变量已在控制台配置：');
 console.log('  ANON_ALIAS_SECRET       匿名别名派生密钥（缺失时匿名发布会直接报错，属预期的 fail-closed）');
 console.log('  REVIEW_CALLBACK_SECRET  审核回调共享密钥（HTTP 触发场景必需）');
+console.log('  CLOUDBASE_APIKEY        服务端 PostgreSQL/pgstore 专用凭据');
+console.log('  MINIPROGRAM_APP_ID      固定小程序 AppID（非请求身份）');
 console.log('  NODE_ENV=production     关闭开发期的 DTO 泄露自检开销');
 
 // 4. 输出部署命令
@@ -67,7 +69,7 @@ for (const fn of functions) {
 }
 
 console.log('\n定时触发器（worker 每分钟执行一次）：');
-console.log(`  tcb fn trigger create worker --env-id ${envId} --name review-tick --config '{"cron":"0 * * * * * *"}'`);
+console.log(`  tcb fn trigger create worker --env-id ${envId} --name blacklight-review-minute --config '{"cron":"0 * * * * * *"}'`);
 
 console.log('\n部署后验收（见 docs/09-testing.md）：');
 console.log('  1. 访客调用 posts/list → 只返回公开内容');

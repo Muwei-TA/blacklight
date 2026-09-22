@@ -17,7 +17,6 @@ const {
   IDENTITY_MODE,
   ASSET_STATUS,
   NOTIFY_TYPE,
-  REVIEW_TASK_STATUS,
   DEFAULT_CLUB_ID,
 } = require('../shared/constants');
 const policies = require('../shared/policies');
@@ -83,12 +82,13 @@ async function hydrateCards(posts, ctx) {
   const userById = new Map(users.map((u) => [u._id, u]));
   const topicById = new Map(topics.map((t) => [t._id, t]));
 
+  const readableAssets = await require('./assets').signReadableAssets(assets, posts, ctx);
   return posts.map((post) =>
     presenters.presentPostCard(post, {
       viewer: ctx.viewer,
       authorUser: userById.get(post.ownerId),
       alias: aliasDocs.get(post._id),
-      assets,
+      assets: readableAssets,
       topic: topicById.get(post.topicId),
       reacted: myReactions.has(post._id),
       bookmarked: myBookmarks.has(post._id),
@@ -179,11 +179,12 @@ async function getDetail(payload, ctx) {
     db.findOneById(COLLECTIONS.consents, `${id}:collection`),
   ]);
 
+  const readableAssets = await require('./assets').signReadableAssets(assets, [post], ctx);
   const dto = presenters.presentPostDetail(post, {
     viewer: ctx.viewer,
     authorUser,
     alias: aliasMap.get(post._id),
-    assets,
+    assets: readableAssets,
     topic,
     reacted: reacted.has(id),
     bookmarked: bookmarked.has(id),
@@ -201,7 +202,8 @@ async function getDetail(payload, ctx) {
  * 任一步失败都不留"列表有帖子但附件还属于临时用户"的中间态。
  */
 async function createPost(payload, ctx) {
-  if (!policies.canCreatePost(ctx.viewer)) throw errors.membershipInvalid();
+  if (!ctx.viewer.isMember) throw errors.membershipInvalid();
+  if (!policies.canUsePublishing(ctx.viewer, ctx.capabilities)) throw errors.forbidden({ reason: 'publishing unavailable' });
 
   const input = validators.validatePostInput(payload);
 
@@ -211,8 +213,7 @@ async function createPost(payload, ctx) {
   }
 
   const idempotencyKey = validators.requireString(payload.idempotencyKey, '请求标识', { max: 120 });
-  if (ctx.capabilities.publishing === false) throw errors.forbidden({ reason: 'publishing paused' });
-  if (input.assetIds.length && ctx.capabilities.uploads !== true) throw errors.forbidden({ reason: 'uploads disabled' });
+  if (input.assetIds.length && !policies.canUseUploads(ctx.viewer, ctx.capabilities)) throw errors.forbidden({ reason: 'uploads disabled' });
 
   // 校验附件归属与状态：只能绑定本人已验证的附件
   let hasVideo = false;
@@ -275,10 +276,16 @@ async function createPost(payload, ctx) {
   }
   const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, category: post.category })).digest('hex');
   try {
-    return await db.getDb().rpc('hg_create_post', {
+    const created = await db.getDb().rpc('hg_create_post', {
       p_key: `${ctx.viewer.userId}:createPost:${idempotencyKey}`,
       p_hash: fingerprint, p_post: post, p_alias: aliasDoc,
     });
+    if (created.state !== 'private_saved') {
+      await require('./foreground-review').runOwnedReview('post', created.id, ctx).catch(() => null);
+      const current = await db.findOneById(COLLECTIONS.posts, created.id);
+      return { ...created, state: current?.status || 'pending', version: current?.version || created.version };
+    }
+    return created;
   } catch (err) {
     if (/IDEMPOTENCY_|ASSET_BINDING_CONFLICT/.test(err.message)) throw errors.conflict('请求内容或附件状态已变化，请刷新后重试');
     throw err;
@@ -398,13 +405,15 @@ async function listComments(payload, ctx) {
   const post = await db.findOneById(COLLECTIONS.posts, id);
   if (!policies.canReadPost(ctx.viewer, post)) throw errors.notAccessible({ postId: id });
 
-  const _ = db.command();
   const res = await db
     .coll(COLLECTIONS.comments)
     .where({
       postId: id,
-      // 只展示已通过审核的评论；本人的待审评论额外单独取
-      status: ctx.viewer.userId ? _.in([POST_STATUS.PUBLISHED]) : POST_STATUS.PUBLISHED,
+      // 仅作者能在刷新后看到自己的待审回应。
+      ...(ctx.viewer.userId ? { $or: [
+        { status: POST_STATUS.PUBLISHED },
+        { status: POST_STATUS.PENDING, ownerId: ctx.viewer.userId },
+      ] } : { status: POST_STATUS.PUBLISHED }),
     })
     .orderBy('createdAt', 'asc')
     .limit(100)
@@ -456,6 +465,7 @@ async function listComments(payload, ctx) {
 
 /** POST /posts/{id}/comments —— 提交后 pending，审核通过才展示 */
 async function createComment(payload, ctx) {
+  if (!policies.canUsePublishing(ctx.viewer, ctx.capabilities)) throw errors.forbidden({ reason: 'publishing unavailable' });
   const id = validators.requireId(payload.id, 'id');
   const input = validators.validateCommentInput(payload);
 
@@ -469,62 +479,33 @@ async function createComment(payload, ctx) {
     if (!parent || parent.postId !== id) throw errors.invalidInput('回复对象不存在', { field: 'replyToId' });
   }
 
-  const idempotencyKey = payload.idempotencyKey || '';
-  const claim = await db.claimIdempotency(idempotencyKey, ctx.viewer.userId, 'createComment');
-  if (!claim.isNew && claim.result) return claim.result;
-
-  const added = await db.coll(COLLECTIONS.comments).add({
-    data: {
-      postId: id,
-      ownerId: ctx.viewer.userId,
-      replyToId: input.replyToId,
-      body: input.body,
-      identityMode: input.identityMode,
-      status: POST_STATUS.PENDING,
-      version: 1,
-      createdAt: db.serverDate(),
-      updatedAt: db.serverDate(),
-    },
-  });
-
-  // 匿名评论：复用同线程别名；首次参与则生成
-  if (input.identityMode === IDENTITY_MODE.ANONYMOUS) {
-    const existing = await db
-      .coll(COLLECTIONS.anonymousIdentities)
-      .where({ threadId: id, userId: ctx.viewer.userId })
-      .limit(1)
-      .get()
-      .catch(() => ({ data: [] }));
-
-    if (!existing.data || existing.data.length === 0) {
-      const { alias, aliasKey } = anonymity.deriveAlias(id, ctx.viewer.userId, process.env.ANON_ALIAS_SECRET);
-      await db.coll(COLLECTIONS.anonymousIdentities).add({
-        data: {
-          threadId: id,
-          userId: ctx.viewer.userId,
-          alias,
-          aliasKey,
-          isThreadAuthor: false,
-          createdAt: db.serverDate(),
-        },
-      });
-    }
+  const key = validators.requireString(payload.idempotencyKey, '请求标识', { max: 120 });
+  const commentId = randomUUID();
+  const createdAt = db.serverDate();
+  const identityMode = post.identityMode === IDENTITY_MODE.ANONYMOUS && post.ownerId === ctx.viewer.userId
+    ? IDENTITY_MODE.ANONYMOUS : input.identityMode;
+  const comment = { _id: commentId, postId: id, ownerId: ctx.viewer.userId,
+    replyToId: input.replyToId, body: input.body, identityMode,
+    status: POST_STATUS.PENDING, version: 1, createdAt, updatedAt: createdAt };
+  let alias = null;
+  if (identityMode === IDENTITY_MODE.ANONYMOUS) {
+    const derived = anonymity.deriveAlias(id, ctx.viewer.userId, process.env.ANON_ALIAS_SECRET);
+    alias = { _id: randomUUID(), threadId: id, userId: ctx.viewer.userId, ...derived,
+      isThreadAuthor: post.ownerId === ctx.viewer.userId, createdAt };
   }
-
-  await db.coll(COLLECTIONS.reviewTasks).add({
-    data: {
-      targetType: 'comment',
-      targetId: added._id,
-      status: REVIEW_TASK_STATUS.QUEUED,
-      attempts: 0,
-      needsMedia: false,
-      createdAt: db.serverDate(),
-    },
-  });
-
-  const result = { id: added._id, state: 'pending' };
-  await db.completeIdempotency(idempotencyKey, ctx.viewer.userId, 'createComment', result);
-  return result;
+  const fingerprint = createHash('sha256').update(JSON.stringify({ id, ...input, identityMode })).digest('hex');
+  try {
+    const created = await db.getDb().rpc('hg_create_comment', {
+      p_key: `${ctx.viewer.userId}:createComment:${key}`, p_hash: fingerprint,
+      p_comment: comment, p_alias: alias,
+    });
+    await require('./foreground-review').runOwnedReview('comment', created.id, ctx).catch(() => null);
+    const current = await db.findOneById(COLLECTIONS.comments, created.id);
+    return { ...created, state: current?.status || 'pending' };
+  } catch (err) {
+    if (/IDEMPOTENCY_|COMMENT_TARGET_CHANGED/.test(err.message)) throw errors.conflict('内容或请求状态已变化，请刷新后重试');
+    throw err;
+  }
 }
 
 /** GET /me/contents —— 我的内容各状态列表 */
@@ -579,14 +560,16 @@ async function listMyContents(payload, ctx) {
   } else if (tab === 'pending') {
     where = {
       ownerId: ctx.viewer.userId,
-      status: _.in([POST_STATUS.PENDING, POST_STATUS.REJECTED, POST_STATUS.UPLOADING]),
+      status: _.in([POST_STATUS.PENDING, POST_STATUS.REJECTED, POST_STATUS.HIDDEN, POST_STATUS.UPLOADING]),
     };
   } else {
     where = { ownerId: ctx.viewer.userId, visibility: VISIBILITY.PRIVATE, status: POST_STATUS.PUBLISHED };
   }
 
   const { items, hasMore } = await db.paginate(COLLECTIONS.posts, where, { cursor, pageSize });
-  const cards = await hydrateCards(items, ctx);
+  const ownItems = items.map((post) => post.status === POST_STATUS.HIDDEN
+    ? { ...post, body: '', title: '已暂时隐藏的内容', assetIds: [] } : post);
+  const cards = await hydrateCards(ownItems, ctx);
   return {
     items: cards,
     nextCursor: hasMore && items.length > 0 ? validators.buildCursor(items[items.length - 1]) : null,
