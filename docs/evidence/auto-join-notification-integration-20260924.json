@@ -1,0 +1,41 @@
+{
+  "head": "87236be88f12d9231e2900fa428fd81bc552221a",
+  "migrations": 16,
+  "engine": "16.15 (Debian 16.15-1.pgdg12+2)",
+  "integrationSuites": [
+    "membership-apply.sql",
+    "admin-todo-notifications.sql"
+  ],
+  "role": "service_role",
+  "newUser": {
+    "concurrentCalls": 8,
+    "state": "active",
+    "applications": 1,
+    "adminNotifications": 0
+  },
+  "removedUser": {
+    "concurrentCalls": 8,
+    "state": "pending",
+    "membership": "removed",
+    "applications": 1,
+    "adminNotifications": {
+      "it-admin": 1,
+      "it-moderator": 1
+    }
+  },
+  "inviteUses": {
+    "ITNEW": 1,
+    "ITREMOVED": 1
+  },
+  "retryStable": true,
+  "roleRevocation": {
+    "realSessionResolution": true,
+    "realNotificationHandlers": true,
+    "serviceRoleSqlTransport": true,
+    "visibleBefore": 1,
+    "unreadBefore": 1,
+    "visibleAfter": 0,
+    "unreadAfter": 0,
+    "newNotificationAfterRevoke": false
+  }
+}
