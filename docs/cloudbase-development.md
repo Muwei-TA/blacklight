@@ -40,7 +40,7 @@ ON CONFLICT DO NOTHING;
 | 8 次同幂等键并发发帖 | 单条帖子、单条审核任务、单条幂等记录 |
 | PG 事务集成 | 发帖、治理、邀请码、入社、评论、图片租约、审核、注销及清理绑定测试通过；所有 SQL fixture 使用事务回滚 |
 | API 微信内容安全接口 | 真实微信文字安全调用返回 pass；最新 `admin/security/check` 返回 pass |
-| timer 微信内容安全接口 | 当前 SCF timer 缺少有效微信 OpenAPI token，错误 -501001；重建 timer 后仍复现。失败始终保持待审，达到上限转人工 |
+| timer 微信内容安全接口 | 09:53 已修复：改为微信 IDE 登记的定时器，核验本次 wx_trigger/tcb/AppID 上下文；真实任务 passed、内容 published/v2、attempts=0，伪造客户端仍 forbidden |
 | PG 图片上传／签名／审核 | 资产 `bd740f16-d05e-447f-8704-72bef2d5bf8d` 已 verified，清洗 JPEG 为 675 字节、48×48；图文帖 `d93b0b67-5893-4202-879f-de9e5773a867` 已 published v2 |
 | 原生 UI 回应 | 输入回应 `b8ba47e4-22b2-4a58-95ee-7d495f52685a` 已由数据库证实 published；截图见前端 `docs/evidence/published-comment.jpg`，计数为 1 |
 | 私密内容隔离 | `0c0f9e22-7a04-41f8-87fe-ce89a83ec428` 真实创建为 `private_saved`；管理调用伪造 owner 读取仍为 `not_accessible` |
@@ -53,12 +53,12 @@ CLS 当前已开通。旧 `GetFunctionLogs/GetFunctionLogDetail` 接口已下线
 
 ## 自动审核与恢复边界
 
-当前环境已证明真实微信 API 调用可进行文字安全检查，`admin/security/check` 也返回通过；单独 SCF timer 的同一调用仍为 `-501001`。前台本人审核已复用租约/RPC 并完成验证，但后台重试失败仍保持待审，达到上限后转人工，不能称为后台自动审核通过。外部调用仍无权直接提交“审核通过”结果，服务错误必须保留任务和内容。
+当前环境已验证 API 与微信 IDE 定时器均能完成文字内容安全检查。普通 SCF timer 的 `-501001` 已定位为错误的登记通道；微信 timer 使用可信本次调用中的 `TCB_SOURCE=wx_trigger`、`TRIGGER_SRC=tcb` 与匹配 AppID，代码已支持并拒绝伪造客户端。真实后台审核证据见 `evidence/wechat-timer-20260923.json`。前台与后台继续复用租约/RPC，服务失败不公开内容；故障强制中断恢复及完整人工复核样本仍待验收。
 
 ## 当前未验收项与最小动作
 
-- `wx.getImageInfo` 被 `downloadFile` 合法域名拦截；已请求加入 `https://shudong-d4g4blap4a5069a28.api.tcloudbasegateway.com`，等待用户确认后复验图片预览。
+- 图片域名已配置。刷新项目后修复 OPA 过宽拒绝，真实 getImageInfo 和页面预览通过；缺签/伪造签名 401、原始对象 403，334 秒旧链接 401、重新授权续签可读。见 `evidence/signed-image-20260923.json`。
 - 真机输入、图片展示、回应、返回栈和正式上传/发布尚未执行。开发预览码不等于上线证据。
-- 公开、视频、文集、导出保持关闭；timer token/权限问题单独排障，不扩大本次验收范围。
+- 公开、视频、文集、导出保持关闭；完整 G0、多角色、真机与运营验收仍未完成。任务状态详见 `backend-task-audit-2026-09-23.md`。
 
 截图和汇总证据位于前端 `docs/evidence/`，其中 `acceptance-20260923.json` 为本次状态汇总。开发阶段的合成测试内容仅用于验收，不能当作真实社团活动数据。

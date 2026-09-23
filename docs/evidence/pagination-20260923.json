@@ -1,0 +1,14 @@
+{
+  "environment": "shudong-d4g4blap4a5069a28",
+  "date": "2026-09-23",
+  "transport": "real wx.cloud.callFunction api/posts/list",
+  "pageSize": 1,
+  "firstCode": 0,
+  "secondCode": 0,
+  "firstCount": 1,
+  "secondCount": 1,
+  "noDuplicates": true,
+  "secondHasCursor": false,
+  "regressions": ["PostgreSQL ISO date cursor round-trip", "pagination retains original OR visibility conditions", "invalid cursor timestamps rejected"],
+  "deployment": "api/shared updated via WeChat DevTools incremental deployment"
+}

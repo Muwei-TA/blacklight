@@ -13,7 +13,12 @@
     "signatureMissingStatus": 401,
     "signatureForgedStatus": 401,
     "unsignedObjectStatus": 403,
-    "detailPageTapPreview": "visible in DevTools"
+    "detailPageTapPreview": "visible in DevTools",
+    "expiredLink": { "elapsedSeconds": 334.775, "status": 401 },
+    "freshlyAuthorizedLinkAfterExpiry": { "success": true, "width": 48, "height": 48, "type": "jpeg" },
+    "privateBucket": true,
+    "objectsRlsEnabled": true,
+    "objectsClientPolicyCount": 0
   },
   "limitations": ["Physical iOS and Android device acceptance pending", "Revocation does not remove previously downloaded files"]
 }
