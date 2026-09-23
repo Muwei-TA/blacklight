@@ -1,5 +1,7 @@
 # 黑光树洞续作交接 — 2026-09-23 10:17
 
+> 仓库路径更正（2026-09-23）：当前前端主仓库为 `/Users/muwei/WeChatProjects/tdesign-miniprogram-starter`，后端主仓库为 `/Users/muwei/WeChatProjects/blacklight-development`。下文旧路径记录的是当时工作区；旧开发检出保留在 `/Users/muwei/WeChatProjects-archive-20260923/` 下。
+
 ## 结论与工作区
 
 本轮修复交接中的图片读取与后台审核阻塞，补齐 T-B09 开发环境护栏、列表错误态、点击图片续签和真实 PG 分页。两仓继续在 `codex/cloudbase-integration`；本轮已本地提交，尚未推送或合并 main，没有上传体验版或正式发布。完整小程序上线验收仍未完成。
