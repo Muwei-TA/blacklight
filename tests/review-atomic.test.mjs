@@ -56,7 +56,7 @@ const fakeDb = {
 
 const originalLoad = Module._load;
 Module._load = function patchedLoad(request, parent, isMain) {
-  if (request === './db' && parent?.filename?.endsWith('/shared/usage.js')) return fakeDb;
+  if (request === './db' && parent?.filename?.replace(/\\/g, '/').endsWith('/shared/usage.js')) return fakeDb;
   if (request === 'wx-server-sdk') return fakeCloud;
   if (request.endsWith('/shared/constants')) return constants;
   if (request.endsWith('/shared/db')) return fakeDb;
