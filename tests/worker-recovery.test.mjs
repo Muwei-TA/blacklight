@@ -178,9 +178,24 @@ test('worker 不把伪造 Timer event 当作可信来源', () => {
   sourceContext = { SOURCE: 'wx_trigger' };
   assert.equal(worker._internals.verifyWorkerSource(fakeCloud, { Type: 'forged' }, {}).ok, false);
   sourceContext = {};
-  assert.equal(worker._internals.verifyWorkerSource(fakeCloud, {}, { TRIGGER_SRC: 'timer' }).ok, true);
-  sourceContext = { OPENID: 'client' };
+  const timerContext = { environment: JSON.stringify({ TRIGGER_SRC: 'timer' }) };
   assert.equal(worker._internals.verifyWorkerSource(fakeCloud, {}, { TRIGGER_SRC: 'timer' }).ok, false);
+  assert.equal(worker._internals.verifyWorkerSource(fakeCloud, {}, {}, timerContext).ok, true);
+  sourceContext = { OPENID: 'client' };
+  assert.equal(worker._internals.verifyWorkerSource(fakeCloud, {}, {}, timerContext).ok, false);
+});
+
+test('WeChat IDE timers require fresh trusted source, app binding and no client identity', () => {
+  sourceContext = { SOURCE: 'wx_trigger' };
+  const runtime = { MINIPROGRAM_APP_ID: 'test-app', TRIGGER_SRC: 'tcb' };
+  const environment = { TCB_SOURCE: 'wx_trigger', TRIGGER_SRC: 'tcb', WX_APPID: 'test-app' };
+  const verify = (env, event = {}) => worker._internals.verifyWorkerSource(fakeCloud, event, runtime, { environment: JSON.stringify(env) }).ok;
+  assert.equal(verify(environment), true);
+  assert.equal(verify({ ...environment, WX_OPENID: 'client' }), false);
+  assert.equal(verify({ ...environment, WX_APPID: 'wrong-app' }), false);
+  assert.equal(verify({ ...environment, TCB_SOURCE: 'wx_client' }), false);
+  assert.equal(verify({}, { Type: 'timer', userInfo: { appId: 'test-app' }, environment }), false);
+  assert.equal(worker._internals.verifyWorkerSource(fakeCloud, {}, runtime, { environment: 'broken' }).ok, false);
 });
 
 test('回调 trace/version 绑定拒绝旧版本', () => {

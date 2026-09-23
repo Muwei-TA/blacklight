@@ -34,21 +34,34 @@ function readWXContext(cloud) {
 
 /**
  * Timer/console event fields are input data and are never an authentication
- * signal.  TRIGGER_SRC is injected by the SCF runtime (verified timer='timer'); the actual
- * cloud function invocation permission still needs to be restricted in the
- * CloudBase console and is recorded as an untested deployment boundary.
+ * signal. The current invocation environment, supplied by the runtime, is
+ * authoritative. WeChat IDE timers use TCB_SOURCE=wx_trigger/TRIGGER_SRC=tcb;
+ * plain SCF timers use TRIGGER_SRC=timer. Never trust a warm process's identity.
  */
-function verifyWorkerSource(cloud, event = {}, runtime = process.env) {
+function verifyWorkerSource(cloud, event = {}, runtime = process.env, context = {}) {
   const wxContext = readWXContext(cloud);
   const source = wxContext.SOURCE || '';
+  let invocationEnvironment = {};
+  try { invocationEnvironment = JSON.parse(context.environment || '{}'); } catch (_) { /* fail closed */ }
+  const requestSource = invocationEnvironment.TCB_SOURCE || '';
+  const requestTrigger = invocationEnvironment.TRIGGER_SRC || '';
+  const requestHasOpenId = !!invocationEnvironment.WX_OPENID;
+  const requestAppIdMatches = !!runtime.MINIPROGRAM_APP_ID
+    && invocationEnvironment.WX_APPID === runtime.MINIPROGRAM_APP_ID;
+  const isWeChatTimer = requestSource === 'wx_trigger' && requestTrigger === 'tcb' && requestAppIdMatches;
+  const isScfTimer = requestTrigger === 'timer' && !requestSource;
   return {
-    ok: runtime.TRIGGER_SRC === 'timer' && !wxContext.OPENID,
+    ok: !requestHasOpenId && !wxContext.OPENID && (isWeChatTimer || isScfTimer),
     triggerSource: runtime.TRIGGER_SRC || '',
     source,
     hasOpenId: !!wxContext.OPENID,
     eventType: typeof event.Type === 'string' ? event.Type : '',
     triggerName: typeof event.TriggerName === 'string' ? event.TriggerName : '',
     sourceError: wxContext.sourceError || '',
+    requestSource,
+    requestTrigger,
+    requestHasOpenId,
+    requestAppIdMatches,
   };
 }
 
@@ -213,7 +226,7 @@ exports.main = async (event = {}, context = {}) => {
     return { code: 'server', data: { claimed: 0, done: 0, failed: 1, manual: 0 } };
   }
 
-  const source = verifyWorkerSource(cloud, event);
+  const source = verifyWorkerSource(cloud, event, process.env, context);
   if (!source.ok) {
     // Type/TriggerName are logged for diagnosis only. They are ordinary event
     // fields and must never be used as proof that this was a timer invocation.
@@ -223,6 +236,11 @@ exports.main = async (event = {}, context = {}) => {
       eventType: source.eventType,
       triggerName: source.triggerName,
       sourceError: source.sourceError,
+      triggerSource: source.triggerSource,
+      requestSource: source.requestSource,
+      requestTrigger: source.requestTrigger,
+      requestHasOpenId: source.requestHasOpenId,
+      requestAppIdMatches: source.requestAppIdMatches,
       cloudPermissionVerified: false,
     });
     return { code: 'forbidden' };
