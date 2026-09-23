@@ -100,6 +100,21 @@ test('伪造游标被拒', () => {
   assert.throws(() => v.parseCursor(Buffer.from('{"x":1}').toString('base64')), /游标不合法/);
 });
 
+test('PostgreSQL ISO creation times round-trip through a pagination cursor', () => {
+  const createdAt = '2026-09-23T01:18:42.123Z';
+  for (const timestamp of [createdAt, new Date(createdAt)]) {
+    const cursor = v.buildCursor({ _id: 'pg-post', createdAt: timestamp });
+    assert.deepEqual(v.parseCursor(cursor), { createdAt: Date.parse(createdAt), id: 'pg-post' });
+  }
+  assert.throws(() => v.buildCursor({ _id: 'broken', createdAt: 'invalid' }), /invalid creation time/);
+});
+
+test('out-of-range cursor dates and empty identifiers are rejected', () => {
+  for (const value of [{ createdAt: 1e100, id: 'x' }, { createdAt: 1, id: '' }]) {
+    assert.throws(() => v.parseCursor(Buffer.from(JSON.stringify(value)).toString('base64')), /游标不合法/);
+  }
+});
+
 test('分页大小被夹紧到合法区间', () => {
   assert.equal(v.clampPageSize(9999), CONTENT_LIMITS.maxPageSize);
   assert.equal(v.clampPageSize(10), 10);

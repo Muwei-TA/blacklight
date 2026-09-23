@@ -50,18 +50,19 @@ function serverDate() {
  */
 async function paginate(name, where = {}, { cursor = null, pageSize = 20, order = 'desc' } = {}) {
   const _ = command();
-  const query = { ...where };
+  let query = { ...where };
 
   if (cursor) {
     const cursorDate = new Date(cursor.createdAt);
     // 同一毫秒内用 _id 兜底排序，避免边界重复或漏读
-    query.$or = [
+    const afterCursor = { $or: [
       { createdAt: order === 'desc' ? _.lt(cursorDate) : _.gt(cursorDate) },
       {
         createdAt: cursorDate,
         _id: order === 'desc' ? _.lt(cursor.id) : _.gt(cursor.id),
       },
-    ];
+    ] };
+    query = { $and: [where, afterCursor] };
   }
 
   const res = await coll(name)

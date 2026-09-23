@@ -42,7 +42,8 @@ function parseCursor(value) {
   if (typeof value !== 'string' || value.length > 200) throw invalidInput('游标不合法', { field: 'cursor' });
   try {
     const decoded = JSON.parse(Buffer.from(value, 'base64').toString('utf8'));
-    if (!decoded || typeof decoded.createdAt !== 'number' || typeof decoded.id !== 'string') {
+    if (!decoded || !Number.isFinite(decoded.createdAt) || !Number.isFinite(new Date(decoded.createdAt).getTime())
+      || typeof decoded.id !== 'string' || !decoded.id || decoded.id.length > 64) {
       throw new Error('bad cursor shape');
     }
     return decoded;
@@ -53,7 +54,8 @@ function parseCursor(value) {
 
 function buildCursor(item) {
   if (!item) return null;
-  const createdAt = item.createdAt instanceof Date ? item.createdAt.getTime() : Number(item.createdAt);
+  const createdAt = typeof item.createdAt === 'number' ? item.createdAt : new Date(item.createdAt).getTime();
+  if (!Number.isFinite(createdAt)) throw new Error('Cannot build cursor from invalid creation time');
   return Buffer.from(JSON.stringify({ createdAt, id: item._id }), 'utf8').toString('base64');
 }
 
