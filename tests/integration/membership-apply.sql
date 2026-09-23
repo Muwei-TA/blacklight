@@ -1,5 +1,5 @@
 -- Run after 20260922160000_postgresql_core.sql and
--- 20260922210000_membership_apply.sql with the service role.
+-- all migrations through 20260924080000_invite_auto_join.sql with the service role.
 -- The fixtures are isolated by IDs and the outer transaction is rolled back.
 BEGIN;
 DO $$
@@ -42,9 +42,9 @@ BEGIN
   -- The actor is taken from p_actor_id; a forged payload userId is ignored.
   result := public.hg_apply_membership(
     applicant_id,
-    jsonb_build_object('displayName', '申请昵称', 'inviteCode', lower(invite_code), 'rulesVersion', 'v9.0', 'userId', 'forged-user')
+    jsonb_build_object('displayName', '申请昵称', 'inviteCode', lower(invite_code), 'rulesVersion', 'v9.0', 'userId', 'forged-user', 'status', 'pending', 'role', 'moderator')
   );
-  IF result->>'state' <> 'pending' OR result->>'applicationId' IS NULL THEN
+  IF result->>'state' <> 'active' OR result->>'applicationId' IS NULL THEN
     RAISE EXCEPTION 'membership application failed: %', result;
   END IF;
   application_id := result->>'applicationId';
@@ -55,17 +55,24 @@ BEGIN
   SELECT doc INTO item FROM public.hg_invite_codes WHERE id = invite_code;
   IF (item->>'usedCount')::integer <> 1 THEN RAISE EXCEPTION 'invite use was not consumed atomically'; END IF;
 
-  -- A retry returns the original pending application and never consumes a
+  SELECT doc INTO item FROM public.hg_memberships WHERE doc->>'userId' = applicant_id;
+  IF item->>'status' <> 'active' OR item->>'role' <> 'member' OR item->>'applicationId' <> application_id THEN
+    RAISE EXCEPTION 'membership not activated or client role/status trusted';
+  END IF;
+  SELECT doc INTO item FROM public.hg_users WHERE id = applicant_id;
+  IF item->>'displayName' <> '申请昵称' THEN RAISE EXCEPTION 'admission profile not updated'; END IF;
+
+  -- A retry returns the original active application and never consumes a
   -- second use, even if the retry carries a different/now-invalid code.
   result := public.hg_apply_membership(
     applicant_id,
     jsonb_build_object('displayName', '改名不应覆盖', 'inviteCode', 'NOT-A-REAL-CODE', 'rulesVersion', 'wrong')
   );
   IF result->>'applicationId' IS DISTINCT FROM application_id THEN
-    RAISE EXCEPTION 'pending replay returned a different application';
+    RAISE EXCEPTION 'active replay returned a different application';
   END IF;
   SELECT doc INTO item FROM public.hg_invite_codes WHERE id = invite_code;
-  IF (item->>'usedCount')::integer <> 1 THEN RAISE EXCEPTION 'pending replay consumed invite use'; END IF;
+  IF (item->>'usedCount')::integer <> 1 THEN RAISE EXCEPTION 'active replay consumed invite use'; END IF;
 
   -- A second user cannot exceed the locked invite quota.
   BEGIN
@@ -114,4 +121,4 @@ BEGIN
   IF (item->>'usedCount')::integer <> 0 THEN RAISE EXCEPTION 'member rejection consumed invite use'; END IF;
 END $$;
 ROLLBACK;
-SELECT 'PASS: locked invite quota, rules version, pending replay, actor binding, and rollback' AS result;
+SELECT 'PASS: atomic admission, locked quota, rules consent, replay, actor binding, and rollback' AS result;

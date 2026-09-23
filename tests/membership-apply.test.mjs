@@ -18,7 +18,7 @@ const fakeDb = {
       async rpc(name, args) {
         calls.push({ name, args });
         if (rpcError) throw rpcError;
-        return { state: 'pending', applicationId: 'application:1' };
+        return { state: 'active', applicationId: 'application:1' };
       },
     };
   },
@@ -59,9 +59,11 @@ test('入社申请只把 session actor 交给 hg_apply_membership', async () => 
     inviteCode: ' ab12cd34 ',
     rulesVersion: ' v1.0 ',
     userId: 'forged-caller',
+    role: 'moderator',
+    status: 'active',
   }, ctx(applicant));
 
-  assert.deepEqual(result, { state: 'pending', applicationId: 'application:1' });
+  assert.deepEqual(result, { state: 'active', applicationId: 'application:1' });
   assert.equal(calls[0].name, 'hg_apply_membership');
   assert.equal(calls[0].args.p_actor_id, 'u_applicant');
   assert.deepEqual(calls[0].args.p_input, {
@@ -72,13 +74,23 @@ test('入社申请只把 session actor 交给 hg_apply_membership', async () => 
   assert.equal(calls[0].args.p_input.userId, undefined);
 });
 
-test('已是成员的申请在 RPC 前拒绝', async () => {
+test('已完成邀请码入社的重试由 RPC 幂等返回，不在 API 提前拒绝', async () => {
   calls.length = 0;
-  await assert.rejects(
-    session.apply({ displayName: '成员', inviteCode: 'AB12CD34', rulesVersion: 'v1.0' }, ctx(member)),
-    (error) => error.kind === 'invalid_input',
-  );
-  assert.equal(calls.length, 0);
+  rpcError = null;
+  const result = await session.apply({ displayName: '成员', inviteCode: 'AB12CD34', rulesVersion: 'v1.0' }, ctx(member));
+  assert.deepEqual(result, { state: 'active', applicationId: 'application:1' });
+  assert.equal(calls[0].args.p_actor_id, 'u_member');
+});
+
+test('旧成员的 ALREADY_MEMBER 与被撤权用户的 FORBIDDEN 保持业务错误', async () => {
+  for (const [marker, kind] of [['ALREADY_MEMBER', 'invalid_input'], ['FORBIDDEN', 'forbidden']]) {
+    rpcError = Object.assign(new Error(marker), { code: 'P0001' });
+    await assert.rejects(
+      session.apply({ displayName: '成员', inviteCode: 'AB12CD34', rulesVersion: 'v1.0' }, ctx(member)),
+      (error) => error.kind === kind,
+    );
+  }
+  rpcError = null;
 });
 
 test('邀请码和规则版本错误保持业务错误形态', async () => {

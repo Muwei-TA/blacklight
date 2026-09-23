@@ -19,12 +19,11 @@ async function me(payload, ctx) {
 
 /**
  * POST /membership/applications —— 提交入社申请
- * 邀请码只是申请入口：服务端校验有效期、使用次数与撤销状态，
- * 且成功不等于成为成员 —— 仍需管理员批准。
+ * 有效邀请码在事务内直接激活普通成员；被移除成员仍走人工恢复。
+ * 已提交成功的入社可安全重试，邀请码不会重复计次。
  */
 async function apply(payload, ctx) {
   if (!ctx.viewer.isAuthenticated) throw errors.unauthenticated();
-  if (ctx.viewer.isMember) throw errors.invalidInput('你已经是社内成员');
 
   // 限频，防止暴力猜码
   const allowed = await checkRateLimit(ctx.viewer.userId, 'applyMembership', {

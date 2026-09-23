@@ -1,0 +1,30 @@
+{
+  "scope": "Isolated PostgreSQL 16 and local backend validation; no cloud deployment or real-account verification",
+  "migration": "20260924080000_invite_auto_join",
+  "schema": "All 15 migrations applied from empty local database",
+  "commands": {
+    "npm run sync": "passed",
+    "npm test": "122 passed, 0 failed",
+    "npm run lint": "passed",
+    "npm run check": "passed, 58 actions"
+  },
+  "sqlServiceRole": {
+    "tests/integration/membership-apply.sql": "passed",
+    "tests/integration/invite-auto-join.sql": "passed",
+    "tests/integration/atomic-moderation.sql": "passed",
+    "tests/integration/governance.sql": "passed"
+  },
+  "concurrency": {
+    "sameUser8Calls": "8 active responses, same application ID, 1 membership, 1 invite use",
+    "differentUsers8CallsQuota3": "3 active responses, 5 INVITE_INVALID, usedCount=3"
+  },
+  "security": [
+    "SECURITY INVOKER preserved; anon/authenticated cannot execute trusted actor RPC",
+    "Client userId/role/status ignored",
+    "Removed membership remains removed until manual restoration; restored role is member",
+    "Blocked account, invalid/revoked/expired/malformed/exhausted invitation and stale consent rejected",
+    "Forced unique conflict rolls back application, profile and invite count",
+    "Moderation definition differs from applied baseline only by shared membership advisory lock"
+  ],
+  "historicalPending": "Admission requires another apply call with current rules consent and a valid invite. Reusing the original code keeps its reserved use; replacing it consumes the new code once. Existing pending rows are not bulk activated."
+}
