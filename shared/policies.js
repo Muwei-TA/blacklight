@@ -143,6 +143,12 @@ function canDeletePost(viewer, post) {
   return isOwner(viewer, post);
 }
 
+/** 退回内容只允许仍有发布资格的作者修改后重新送审。 */
+function canResubmitRejectedPost(viewer, post, capabilities) {
+  return !!post && post.status === POST_STATUS.REJECTED && isOwner(viewer, post)
+    && canUsePublishing(viewer, capabilities);
+}
+
 /** 举报：不能举报自己的内容，也不能举报仅自己的内容 */
 function canReportPost(viewer, post) {
   if (!canReadPost(viewer, post)) return false;
@@ -288,6 +294,7 @@ module.exports = {
   canComment,
   canChangeVisibility,
   canDeletePost,
+  canResubmitRejectedPost,
   canReportPost,
   canCreatePost,
   isMuted,

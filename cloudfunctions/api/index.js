@@ -37,6 +37,7 @@ const handlers = {
   'posts/list': posts.listFeed,
   'posts/detail': posts.getDetail,
   'posts/create': posts.createPost,
+  'posts/resubmit': posts.resubmitRejectedPost,
   'posts/visibility': posts.changeVisibility,
   'posts/delete': posts.deletePost,
   'posts/reaction': posts.toggleReaction,

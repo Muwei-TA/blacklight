@@ -292,6 +292,57 @@ async function createPost(payload, ctx) {
   }
 }
 
+/** PATCH /posts/{id}/resubmit —— 只修改被退回内容的文字，保留原附件与受众。 */
+async function resubmitRejectedPost(payload, ctx) {
+  const id = validators.requireId(payload.id, 'id');
+  const expectedVersion = Number(payload.expectedVersion);
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    throw errors.invalidInput('缺少版本号', { field: 'expectedVersion' });
+  }
+  const idempotencyKey = validators.requireString(payload.idempotencyKey, '请求标识', { max: 120 });
+  const post = await db.findOneById(COLLECTIONS.posts, id);
+  if (!post || post.ownerId !== ctx.viewer.userId) throw errors.notAccessible({ postId: id });
+  if (!policies.canUsePublishing(ctx.viewer, ctx.capabilities)
+    || (post.status === POST_STATUS.REJECTED
+      && !policies.canResubmitRejectedPost(ctx.viewer, post, ctx.capabilities))) {
+    throw errors.forbidden({ reason: 'post is not resubmittable' });
+  }
+  if (post.visibility === VISIBILITY.PUBLIC && !policies.canUsePublicVisibility(ctx.viewer, ctx.capabilities)) {
+    throw errors.forbidden({ reason: 'publicScope disabled' });
+  }
+  // An identical retry may arrive after the first call advanced the version.
+  // The PG idempotency row decides whether it is a replay or a conflict.
+  if (post.status === POST_STATUS.REJECTED && post.version !== expectedVersion) throw errors.conflict();
+  const input = validators.validatePostInput({
+    ...post,
+    title: payload.title,
+    body: payload.body,
+  });
+  const fingerprint = createHash('sha256')
+    .update(JSON.stringify({ id, expectedVersion, title: input.title, body: input.body }))
+    .digest('hex');
+  try {
+    const result = await db.getDb().rpc('hg_resubmit_rejected_post', {
+      p_key: `${ctx.viewer.userId}:resubmitPost:${idempotencyKey}`,
+      p_hash: fingerprint,
+      p_actor_id: ctx.viewer.userId,
+      p_post_id: id,
+      p_expected_version: expectedVersion,
+      p_title: input.title,
+      p_body: input.body,
+    });
+    await require('./foreground-review').runOwnedReview('post', id, ctx).catch(() => null);
+    const current = await db.findOneById(COLLECTIONS.posts, id);
+    return { ...result, state: current?.status || result.state, version: current?.version || result.version };
+  } catch (err) {
+    if (/IDEMPOTENCY_|VERSION_CONFLICT|POST_NOT_REJECTED|ASSET_BINDING_CONFLICT/.test(err.message)) {
+      throw errors.conflict('内容已变化，请刷新后重试');
+    }
+    if (/FORBIDDEN/.test(err.message)) throw errors.forbidden();
+    throw err;
+  }
+}
+
 /** PATCH /posts/{id}/visibility —— 首版只允许缩小 */
 async function changeVisibility(payload, ctx) {
   const id = validators.requireId(payload.id, 'id');
@@ -622,6 +673,7 @@ module.exports = {
   listFeed,
   getDetail,
   createPost,
+  resubmitRejectedPost,
   changeVisibility,
   deletePost,
   toggleReaction,

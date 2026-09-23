@@ -1,0 +1,41 @@
+{
+  "environment": "shudong-d4g4blap4a5069a28",
+  "feature": "rejected post text editing and resubmission",
+  "migration": {
+    "version": "20260923120000",
+    "name": "resubmit_rejected_post",
+    "firstTask": "task-4982f932",
+    "firstTaskResult": "failed: PL/pgSQL syntax error, no migration applied",
+    "reproduction": "isolated local PostgreSQL 16, corrected CASE parentheses",
+    "successfulTask": "task-7d0fdd7f",
+    "remoteHistoryCount": 14
+  },
+  "api": {
+    "operation": "code update of existing api function only",
+    "deploymentStatus": "Deployment completed",
+    "unauthorizedProbe": {
+      "requestId": "322ffdeb-d838-49b5-b8de-eb71f90ebadb",
+      "action": "posts/resubmit",
+      "resultCode": "not_accessible"
+    }
+  },
+  "postgresqlIntegration": {
+    "test": "tests/integration/resubmit-rejected.sql",
+    "transactionResult": "success",
+    "checked": ["service-only RPC privilege", "idempotent replay", "version and status transition", "new review task", "conflict rollback"],
+    "residualFixtureCounts": { "posts": 0, "members": 0, "tasks": 0, "claims": 0, "audits": 0 }
+  },
+  "simulator": {
+    "tool": "WeChat Developer Tools simulator",
+    "fixtureId": "codex-resubmit-20260923-2054",
+    "startingState": "rejected version 2",
+    "editorLoadedReason": true,
+    "nativeTextareaInput": true,
+    "submission": "page submitConfirmed method; native confirmation dialog tap not exercised",
+    "resultPage": "published",
+    "databaseStateAfterReview": "published version 4, resubmittedFromVersion 2",
+    "newReviewTask": "review:codex-resubmit-20260923-2054:3 passed",
+    "cleanup": "normal posts/delete action succeeded; post is deleted version 5 and absent from feed"
+  },
+  "notVerified": ["native confirmation dialog tap", "multi-account role matrix", "iOS and Android physical devices", "WeChat platform release"]
+}

@@ -163,6 +163,16 @@ test('只有作者能删除内容', () => {
   assert.equal(policies.canDeletePost(admin, makePost()), false);
 });
 
+test('只有有效且未禁言的作者能重提被退回内容', () => {
+  const rejected = makePost({ status: POST_STATUS.REJECTED });
+  assert.equal(policies.canResubmitRejectedPost(member, rejected, { publishing: true }), true);
+  assert.equal(policies.canResubmitRejectedPost(other, rejected, { publishing: true }), false);
+  assert.equal(policies.canResubmitRejectedPost(admin, rejected, { publishing: true }), false);
+  assert.equal(policies.canResubmitRejectedPost(removed, rejected, { publishing: true }), false);
+  assert.equal(policies.canResubmitRejectedPost(member, rejected, { publishing: false }), false);
+  assert.equal(policies.canResubmitRejectedPost(member, makePost({ status: POST_STATUS.HIDDEN }), { publishing: true }), false);
+});
+
 test('不能举报自己的内容', () => {
   assert.equal(policies.canReportPost(member, makePost()), false);
   assert.equal(policies.canReportPost(other, makePost()), true);
