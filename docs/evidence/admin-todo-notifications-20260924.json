@@ -1,0 +1,16 @@
+{
+  "environment": "isolated PostgreSQL 16 container; no network; no CloudBase deployment",
+  "migrationCount": 15,
+  "integrationRole": "service_role",
+  "integrationScript": "tests/integration/admin-todo-notifications.sql",
+  "integrationResult": "passed; rolled back",
+  "concurrentEmitters": 8,
+  "resultingEvents": 1,
+  "resultingNotifications": 1,
+  "unitTests": { "passed": 124, "failed": 0 },
+  "sync": "passed",
+  "lint": "passed",
+  "check": "passed",
+  "cloudDeployment": false,
+  "deviceVerification": false
+}

@@ -230,6 +230,7 @@ function presentNotification(notification, { accessible, now } = {}) {
     target: {
       type: notification.targetType,
       id: notification.targetId,
+      ...(['admin_queue', 'admin_appeals'].includes(notification.targetType) ? { queue: notification.targetId } : {}),
       accessible: !!accessible,
     },
   };

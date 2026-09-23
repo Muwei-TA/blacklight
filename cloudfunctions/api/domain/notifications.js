@@ -12,6 +12,8 @@ const presenters = require('../shared/presenters');
 const errors = require('../shared/errors');
 const db = require('../shared/db');
 
+const ADMIN_TARGETS = ['admin_queue', 'admin_appeals'];
+
 const REPLY_TYPES = [NOTIFY_TYPE.COMMENT, NOTIFY_TYPE.REPLY, NOTIFY_TYPE.REACTION_DIGEST];
 
 /** GET /notifications */
@@ -27,6 +29,8 @@ async function list(payload, ctx) {
     recipientId: ctx.viewer.userId,
     eventType: tab === 'reply' ? _.in(REPLY_TYPES) : _.nin(REPLY_TYPES),
   };
+
+  if (!policies.canAccessModeration(ctx.viewer)) where.targetType = _.nin(ADMIN_TARGETS);
 
   const { items, hasMore } = await db.paginate(COLLECTIONS.notifications, where, { cursor, pageSize });
 
@@ -66,9 +70,12 @@ async function markAllRead(payload, ctx) {
 async function unreadCount(payload, ctx) {
   if (!ctx.viewer.isAuthenticated) return { count: 0 };
 
+  const where = { recipientId: ctx.viewer.userId, readAt: null };
+  if (!policies.canAccessModeration(ctx.viewer)) where.targetType = db.command().nin(ADMIN_TARGETS);
+
   const res = await db
     .coll(COLLECTIONS.notifications)
-    .where({ recipientId: ctx.viewer.userId, readAt: null })
+    .where(where)
     .count()
     .catch(() => ({ total: 0 }));
 
