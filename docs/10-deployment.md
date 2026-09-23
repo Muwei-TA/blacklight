@@ -106,14 +106,13 @@ tcb fn deploy review-callback --env-id <envId> --force
 或用微信开发者工具：右键云函数目录 → 上传并部署（云端安装依赖）。
 **注意**：上传前必须先 `npm run sync`，否则 `shared/` 目录不存在。
 
-### 第 8 步：创建定时触发器
+### 第 8 步：登记微信定时触发器
 
-```bash
-tcb fn trigger create worker --env-id <envId> \
-  --name review-tick --config '{"cron":"0 * * * * * *"}'
-```
+在微信开发者工具同步已有云函数列表，对 `worker/config.json` 右键选择「上传触发器」。唯一配置为 `blacklight-review-minute`，cron `0 */1 * * * * *`（每分钟）。不要再通过通用 SCF/TCB CLI 创建第二个 timer。
 
-或在控制台「云函数 → worker → 触发器」添加，cron 为 `0 * * * * * *`（每分钟）。
+原因与已验证边界：普通 SCF timer 曾返回 `-501001 invalid wx openapi access_token`。2026-09-23 经微信工具登记后，运行时本次 `context.environment` 提供 `TCB_SOURCE=wx_trigger`、`TRIGGER_SRC=tcb` 及匹配 AppID，真实任务完成内容安全检查并变为 `passed`。SCF `listFunctionTriggers` 此时为空也不表示微信调度失效。以真实执行日志、审核任务和内容状态为验收证据，见 `docs/evidence/wechat-timer-20260923.json`。
+
+worker 只接受运行时可信上下文；控制台测试或客户端在 event 中伪造 Type/TriggerName 不会获得后台权限。函数权限仍需随 `config.json` 从微信工具上传登记。官方边界说明：[定时云调用](https://docs.cloudbase.net/faq/knowledge/missing-wxcloudapitoken-error)。
 
 ### 第 9 步：设置首个管理员
 

@@ -30,14 +30,7 @@
         "NODE_ENV": "production",
         "CLOUDBASE_APIKEY": "{{env.CLOUDBASE_APIKEY}}",
         "MINIPROGRAM_APP_ID": "{{env.MINIPROGRAM_APP_ID}}"
-      },
-      "triggers": [
-        {
-          "name": "blacklight-review-minute",
-          "type": "timer",
-          "config": "0 */1 * * * * *"
-        }
-      ]
+      }
     },
     {
       "name": "review-callback",

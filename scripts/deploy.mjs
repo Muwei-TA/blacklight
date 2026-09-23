@@ -68,8 +68,10 @@ for (const fn of functions) {
   console.log(`  tcb fn deploy ${fn} --env-id ${envId} --force`);
 }
 
-console.log('\n定时触发器（worker 每分钟执行一次）：');
-console.log(`  tcb fn trigger create worker --env-id ${envId} --name blacklight-review-minute --config '{"cron":"0 * * * * * *"}'`);
+console.log('\n微信定时触发器（worker 每分钟执行一次）：');
+console.log('  在微信开发者工具中，对已有 worker/config.json 右键选择「上传触发器」。');
+console.log('  不使用 tcb/SCF 创建普通 timer；它不具有本项目微信内容安全云调用所需的触发上下文。');
+console.log('  以真实 timer 完成待审任务为验收依据，不以 SCF 触发器列表代替。');
 
 console.log('\n部署后验收（见 docs/09-testing.md）：');
 console.log('  1. 访客调用 posts/list → 只返回公开内容');

@@ -1,0 +1,12 @@
+{
+  "environment": "shudong-d4g4blap4a5069a28",
+  "verifiedAt": "2026-09-23T01:53:03.334Z",
+  "trigger": "blacklight-review-minute",
+  "cron": "0 */1 * * * * *",
+  "registration": "WeChat DevTools worker/config.json > Upload triggers",
+  "trustedInvocation": { "TCB_SOURCE": "wx_trigger", "TRIGGER_SRC": "tcb", "appIdMatches": true, "hasOpenId": false },
+  "fixture": { "postId": "timer-probe-20260923-0949", "creation": "development fixture through hg_create_post; no foreground review invoked", "initialState": "pending", "finalState": "published", "version": 2 },
+  "reviewTask": { "status": "passed", "attempts": 0, "lastError": "", "finishedAt": "2026-09-23T01:53:03.334Z" },
+  "forgedClientTimer": "forbidden",
+  "notes": ["SCF trigger listing becomes empty for the WeChat-managed scheduler; do not recreate a second SCF timer", "No token values were read or persisted", "This is development backend verification, not physical-device or production acceptance"]
+}
