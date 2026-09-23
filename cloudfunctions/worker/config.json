@@ -5,5 +5,12 @@
       "security.imgSecCheck",
       "security.mediaCheckAsync"
     ]
-  }
+  },
+  "triggers": [
+    {
+      "name": "blacklight-review-minute",
+      "type": "timer",
+      "config": "0 */1 * * * * *"
+    }
+  ]
 }

@@ -1,3 +1,5 @@
+> 当前交接：[2026-09-23 开发交接](HANDOFF-2026-09-23.md)。
+
 # 黑光文学社 · 树洞｜后端开发工程书
 
 > 2026-09-23：本分支已适配 PostgreSQL 与 PG 私有存储，真实部署和验收记录见 [CloudBase 开发环境](cloudbase-development.md)。下方原始工程书中的 NoSQL 集合与历史交付状态是开发基线，当前数据库结构以 `cloudbase/migrations/` 为准。
