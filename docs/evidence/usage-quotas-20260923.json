@@ -1,0 +1,70 @@
+{
+  "environment": "shudong-d4g4blap4a5069a28",
+  "migration": {
+    "version": "20260923000000",
+    "name": "usage_quotas",
+    "taskId": "task-c0952bdd",
+    "status": "Succeed",
+    "remoteMigrationCount": 13
+  },
+  "rollbackSql": {
+    "file": "tests/integration/usage-quotas.sql",
+    "passed": true,
+    "remainingFixtureClubs": 0
+  },
+  "reviewConcurrency": {
+    "requests": 8,
+    "configuredLimit": 3,
+    "allowed": 3,
+    "deferred": 5,
+    "persistedCalls": 3
+  },
+  "uploadConcurrency": {
+    "requests": 8,
+    "bytesPerRequest": 2097152,
+    "configuredLimitBytes": 4194304,
+    "allowed": 2,
+    "quotaRejected": 6,
+    "persistedReservedBytes": 4194304
+  },
+  "covered": [
+    "admin alert deduplication",
+    "no regular-member quota alerts",
+    "legacy three-argument upload RPC compatibility",
+    "active uploading lease reserves capacity",
+    "purged assets retain charged bytes",
+    "zero quota disables new calls",
+    "invalid configuration fails closed",
+    "client roles lack quota table/RPC privileges"
+  ],
+  "cleanup": "Only this test's two unuploaded intents, their idempotency rows, fixture daily counter and fixture club were removed",
+  "limits": "These validate application guardrails, not provider billing budgets or production capacity",
+  "deployment": {
+    "api": "Active; WeChat IDE full deployment confirmed",
+    "worker": "Active; WeChat IDE full deployment confirmed",
+    "adminPage": "rendered live without error",
+    "forgedModeratorRequest": "forbidden",
+    "actualTextCheck": {
+      "suggest": "pass",
+      "countBefore": 0,
+      "countAfter": 1
+    },
+    "actualImage": {
+      "assetId": "f13b653e-d2c7-471f-a6f6-a2326734a476",
+      "status": "verified",
+      "chargedBytes": 628,
+      "reservedBytes": 0,
+      "imageCalls": 1
+    },
+    "timerUsageSummary": "verified in club configuration"
+  },
+  "postDeploymentTimer": {
+    "postId": "timer-quota-probe-20260923",
+    "postState": "published",
+    "version": 2,
+    "taskState": "passed",
+    "attempts": 0,
+    "finishedAt": "2026-09-23T02:16:05.793Z",
+    "totalMeteredCalls": 3
+  }
+}

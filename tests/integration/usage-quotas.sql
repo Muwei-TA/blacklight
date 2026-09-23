@@ -44,7 +44,7 @@ BEGIN
       PERFORM hg_image_intent(club||':owner3',club,'usage-intent-key3',asset||jsonb_build_object('_id',club||':image3','ownerId',club||':owner3'));
       RAISE EXCEPTION 'club quota bypassed';
     EXCEPTION WHEN raise_exception THEN
-      IF SQLERRM<>'CLUB_UPLOAD_QUOTA' THEN RAISE; END IF;
+      IF SQLERRM<>'IMAGE_QUOTA' THEN RAISE; END IF;
     END;
     UPDATE hg_assets SET doc=doc||jsonb_build_object('expiresAt',clock_timestamp()-interval '1 minute','uploadLeaseUntil',clock_timestamp()+interval '1 minute') WHERE id=club||':image1';
     got := hg_usage_status(club);
