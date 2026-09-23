@@ -34,7 +34,7 @@
 **关键规则**：`not_accessible` 用于"无权"和"不存在"两种情况，
 返回体完全相同，防止通过错误文案差异探测私密内容是否存在。
 
-## 4.3 action 清单（44 个）
+## 4.3 action 清单（57 个）
 
 ### 会话与成员资格
 
@@ -167,6 +167,29 @@
 | `admin/report/decide` | `{ id, decision, reason }` | `{ ok }` |
 | `admin/collection/decide` | `{ id, decision, reason? }` | `{ ok }` |
 | `admin/anonymous/reveal` | `{ threadId, reason }` | `{ threadId, mappings }` |
+| `admin/usage/status` | — | `UsageStatusDTO` | moderator/admin |
+
+`UsageStatusDTO` 提供 UTC 当日社团聚合用量，不包含个人用量或身份：
+
+```ts
+{
+  date: string,
+  timezone: 'UTC',
+  upload: {
+    usedBytes: number, reservedBytes: number, dailyLimitBytes: number,
+    userDailyLimitBytes: number, remainingBytes: number, warningRatio: number,
+    alertState: 'ok' | 'near_limit' | 'limit_reached' | 'disabled', alertedAt: string | null
+  },
+  review: {
+    calls: number, textCalls: number, imageCalls: number, dailyLimitCalls: number,
+    remainingCalls: number, warningRatio: number,
+    alertState: 'ok' | 'near_limit' | 'limit_reached' | 'disabled', alertedAt: string | null
+  },
+  updatedAt: string
+}
+```
+
+上传 `dailyLimitBytes` 是社团总额；`userDailyLimitBytes` 是现有单人滚动 24 小时额度。审核达到上限后保留 queued 状态并延迟至下一 UTC 日；跨过预警阈值时向 active moderator/admin 写一次站内通知。
 
 **管理台硬约束**：
 

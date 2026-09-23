@@ -12,6 +12,9 @@ let comments = {};
 let users = {};
 let assets = [];
 let securitySuggest = 'pass';
+let usageAllowed = true;
+let securityCalls = 0;
+let quotaNextAttemptAt = '2026-09-24T00:00:00.000Z';
 
 const fakeCloud = {
   openapi({ appid }) {
@@ -19,6 +22,7 @@ const fakeCloud = {
     return {
       security: {
         async msgSecCheck() {
+          securityCalls += 1;
           return { result: { suggest: securitySuggest } };
         },
       },
@@ -40,6 +44,9 @@ const fakeDb = {
     return {
       async rpc(name, args) {
         calls.push({ name, args });
+        if (name === 'hg_usage_reserve_review_call') {
+          return { allowed: usageAllowed, nextAttemptAt: usageAllowed ? null : quotaNextAttemptAt };
+        }
         const status = args.p_decision === 'approve' ? 'passed' : 'failed';
         return { ok: true, status, targetStatus: args.p_decision === 'approve' ? 'published' : 'rejected' };
       },
@@ -49,6 +56,7 @@ const fakeDb = {
 
 const originalLoad = Module._load;
 Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === './db' && parent?.filename?.endsWith('/shared/usage.js')) return fakeDb;
   if (request === 'wx-server-sdk') return fakeCloud;
   if (request.endsWith('/shared/constants')) return constants;
   if (request.endsWith('/shared/db')) return fakeDb;
@@ -77,6 +85,8 @@ function reset() {
   };
   assets = [];
   securitySuggest = 'pass';
+  usageAllowed = true;
+  securityCalls = 0;
 }
 
 function postTask() {
@@ -101,6 +111,10 @@ test('安全检查通过后，post review 只调用 hg_finish_review 并传 leas
   const result = await review.reviewPost(task);
   assert.equal(result.status, constants.REVIEW_TASK_STATUS.PASSED);
   assert.deepEqual(calls[0], {
+    name: 'hg_usage_reserve_review_call',
+    args: { p_club_id: 'heiguang', p_kind: 'text' },
+  });
+  assert.deepEqual(calls[1], {
     name: 'hg_finish_review',
     args: {
       p_task_id: 'task-post-1',
@@ -119,9 +133,10 @@ test('评论安全检查通过后走同一原子 RPC，使用评论版本', asyn
   const task = commentTask();
   const result = await review.reviewComment(task);
   assert.equal(result.status, constants.REVIEW_TASK_STATUS.PASSED);
-  assert.equal(calls[0].args.p_task_id, 'task-comment-1');
-  assert.equal(calls[0].args.p_expected_version, 2);
-  assert.equal(calls[0].args.p_decision, 'approve');
+  assert.equal(calls[0].name, 'hg_usage_reserve_review_call');
+  assert.equal(calls[1].args.p_task_id, 'task-comment-1');
+  assert.equal(calls[1].args.p_expected_version, 2);
+  assert.equal(calls[1].args.p_decision, 'approve');
 });
 
 test('安全检查明确拒绝时原子标记 failed，服务异常/存疑不绕过 RPC', async () => {
@@ -129,13 +144,15 @@ test('安全检查明确拒绝时原子标记 failed，服务异常/存疑不绕
   securitySuggest = 'risky';
   const failed = await review.reviewPost(postTask());
   assert.equal(failed.status, constants.REVIEW_TASK_STATUS.FAILED);
-  assert.equal(calls[0].args.p_decision, 'reject');
+  assert.equal(calls[1].args.p_decision, 'reject');
 
   reset();
   securitySuggest = 'review';
   const manual = await review.reviewPost(postTask());
   assert.equal(manual.status, constants.REVIEW_TASK_STATUS.MANUAL);
-  assert.equal(calls.length, 0);
+  assert.equal(calls.length, 1, 'the external check is metered even when it requests manual review');
+  assert.equal(calls[0].name, 'hg_usage_reserve_review_call');
+  assert.equal(securityCalls, 1);
 });
 
 test('未验证附件只等待，绑定或归属异常不会发布', async () => {
@@ -151,5 +168,18 @@ test('未验证附件只等待，绑定或归属异常不会发布', async () =>
   assets = [{ _id: 'asset-1', status: constants.ASSET_STATUS.VERIFIED, ownerId: 'other', postId: 'post-1' }];
   const rejected = await review.reviewPost(postTask());
   assert.equal(rejected.status, constants.REVIEW_TASK_STATUS.FAILED);
-  assert.equal(calls[0].args.p_decision, 'reject');
+  assert.equal(calls[1].args.p_decision, 'reject');
+});
+
+test('审核配额触顶时不调用外部接口，任务延期到下一 UTC 日且不走失败决定', async () => {
+  reset();
+  usageAllowed = false;
+  quotaNextAttemptAt = '2026-09-24T00:00:00.000Z';
+  const result = await review.reviewPost(postTask());
+  assert.equal(result.status, constants.REVIEW_TASK_STATUS.QUEUED);
+  assert.equal(result.waitingReason, 'usage_quota');
+  assert.equal(new Date(result.nextAttemptAt).toISOString(), quotaNextAttemptAt);
+  assert.equal(calls.length, 1, 'a denied quota reservation makes no finish-review RPC');
+  assert.equal(calls[0].name, 'hg_usage_reserve_review_call');
+  assert.equal(securityCalls, 0, 'no external moderation API call occurs after the cap');
 });

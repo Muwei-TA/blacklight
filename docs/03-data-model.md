@@ -105,9 +105,11 @@ idx_feed: clubId + status + visibility + createdAt(-1)
 | 字段 | 说明 |
 |---|---|
 | `ownerId` | 只能绑定本人附件 |
+| `clubId` | 服务端从会话绑定的社团 |
 | `mediaType` | `image` / `video` |
 | `declaredSize` / `declaredDuration` | 客户端声明值，**不可信** |
 | `actualSize` | 服务端复核的真实值 |
+| `quotaBytes` / `quotaChargedAt` | 上传意图预留容量与持久计量标记；文件 purge 后仍保留已实际消耗额度 |
 | `cloudPath` / `fileId` | 私有桶路径。文件名不含身份线索 |
 | `status` | `intent` → `uploaded` → `verifying` → `verified` / `rejected` |
 | `tempFileURL` | **仅 verified 时有值**，否则为空串 |
@@ -161,8 +163,10 @@ idx_feed: clubId + status + visibility + createdAt(-1)
 
 **`hg_idempotency`**（受限）：`_id` 为 `{userId}:{action}:{key}`，存 `result` 供重放。
 
-**`hg_club_config`**：单文档 `_id: 'heiguang'`，含 `capabilities` 与 `searchSuggestions`。
-能力开关的唯一来源。
+**`hg_club_config`**：单文档 `_id: 'heiguang'`，含 `capabilities`、`searchSuggestions` 与 `usageLimits`。
+用量阈值字段为 `userUploadDailyBytes`、`clubUploadDailyBytes`、`reviewDailyCalls`、`warningRatio`；由 PostgreSQL 迁移为开发环境填入默认值，管理员可按运营额度调整。
+
+**PostgreSQL `hg_daily_usage`**：按 `club_id + usage_date (UTC)` 保存社团已上传/预留字节、文本/图片审核调用计数、阈值和告警状态。RLS 开启且仅 `service_role` 可读写；API 只通过 moderator/admin 专用的 `admin/usage/status` 返回聚合 DTO，不含个人身份或单人用量。
 
 ## 3.3 游标分页
 

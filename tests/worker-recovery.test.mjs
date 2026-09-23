@@ -135,6 +135,12 @@ test('租约过期可恢复，等待依赖不增加 attempts，执行失败才�
   assert.equal(waiting.waitingReason, 'dependency');
   assert.equal(waiting.nextAttemptAt.getTime(), now + 60_000);
 
+  const quotaWait = recovery.buildWaitingUpdate({
+    status: 'queued', waitingReason: 'usage_quota', nextAttemptAt: '2026-09-24T00:00:00.000Z',
+  }, now, 60_000);
+  assert.equal(quotaWait.waitingReason, 'usage_quota');
+  assert.equal(quotaWait.nextAttemptAt.toISOString(), '2026-09-24T00:00:00.000Z');
+
   const firstFailure = recovery.buildFailureUpdate(
     { attempts: 0 },
     new Error('temporary service failure'),

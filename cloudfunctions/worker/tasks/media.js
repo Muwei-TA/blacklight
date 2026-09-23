@@ -12,8 +12,15 @@
  */
 
 const cloud = require('wx-server-sdk');
-const { COLLECTIONS, ASSET_STATUS, REVIEW_TASK_STATUS, CONTENT_LIMITS } = require('../shared/constants');
+const {
+  COLLECTIONS,
+  ASSET_STATUS,
+  REVIEW_TASK_STATUS,
+  CONTENT_LIMITS,
+  DEFAULT_CLUB_ID,
+} = require('../shared/constants');
 const db = require('../shared/db');
+const usage = require('../shared/usage');
 const {
   ImageProcessingError,
   JPEG_MIME,
@@ -65,7 +72,8 @@ async function verifyFileMetadata(asset) {
 }
 
 /** 图片内容检查：同步返回，可直接闭环 */
-async function checkImage(buffer) {
+async function checkImage(buffer, clubId = DEFAULT_CLUB_ID) {
+  await usage.reserveReviewCall('image', clubId);
   try {
     await cloud.openapi({ appid: process.env.MINIPROGRAM_APP_ID }).security.imgSecCheck({
       media: { contentType: JPEG_MIME, value: buffer },
@@ -116,7 +124,14 @@ async function processAsset(task) {
   }
 
   if (asset.mediaType === 'image') {
-    const result = await checkImage(meta.buffer);
+    let result;
+    try {
+      result = await checkImage(meta.buffer, asset.clubId || DEFAULT_CLUB_ID);
+    } catch (error) {
+      const waiting = usage.waitingForQuota(error);
+      if (waiting) return waiting;
+      throw error;
+    }
     if (!result.pass) {
       await markRejected(asset, '图片未通过内容检查');
       return { status: REVIEW_TASK_STATUS.FAILED, note: 'image blocked' };

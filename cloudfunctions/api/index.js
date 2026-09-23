@@ -20,6 +20,7 @@ const assets = require('./domain/assets');
 const moderation = require('./domain/moderation');
 const governance = require('./domain/governance');
 const operations = require('./domain/operations');
+const usage = require('./domain/usage');
 
 const handlers = {
   // ── 会话与成员资格 ──
@@ -84,6 +85,7 @@ const handlers = {
   'admin/collection/decide': moderation.decideCollection,
   'admin/anonymous/reveal': moderation.revealAnonymous,
   'admin/security/check': operations.securityCheck,
+  'admin/usage/status': usage.getStatus,
   'admin/members/list': governance.listMembers,
   'admin/invites/create': governance.createInvite,
   'admin/member/remove': governance.removeMember,

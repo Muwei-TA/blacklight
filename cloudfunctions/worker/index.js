@@ -18,6 +18,7 @@ const reviewTasks = require('./tasks/review');
 const mediaTasks = require('./tasks/media');
 const cleanupTasks = require('./tasks/cleanup');
 const digestTasks = require('./tasks/digest');
+const usageTasks = require('./tasks/usage');
 const recovery = require('./recovery');
 
 const MAX_ATTEMPTS = 5;
@@ -268,6 +269,8 @@ exports.main = async (event = {}, context = {}) => {
     waiting: 0,
     stale: 0,
     recovered: 0,
+    usage: null,
+    usageFailed: false,
     source: source.source,
   };
 
@@ -337,6 +340,15 @@ exports.main = async (event = {}, context = {}) => {
     await cleanupTasks.cleanupDeletedPostAssets().catch((err) => console.error('[worker] cleanup deleted assets', err.message));
     await cleanupTasks.cleanupIdempotency().catch((err) => console.error('[worker] cleanup idem', err.message));
     await cleanupTasks.processAccountDeletions().catch((err) => console.error('[worker] deletion', err.message));
+  }
+
+  if (mode === 'all' || mode === 'usage') {
+    try {
+      summary.usage = await usageTasks.refreshUsageSummary();
+    } catch (err) {
+      summary.usageFailed = true;
+      console.warn('[worker] usage summary failed', { message: err.message });
+    }
   }
 
   await db.coll(COLLECTIONS.clubConfig).doc('heiguang').update({ data: { workerLastRunAt: db.serverDate(), workerSummary: summary } });

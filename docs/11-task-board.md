@@ -17,6 +17,12 @@
 | T-B06 | worker 任务与审核回调 | `cloudfunctions/worker/`、`review-callback/` |
 | T-B13 | 初始化/部署/自检脚本 | `scripts/*.mjs` |
 
+## 本地已实现，待云端迁移与验收
+
+| ID | 内容 | 产出 |
+|---|---|---|
+| T-B09 | 用量护栏与告警 | 新增 PostgreSQL migration、配置化用户/社团上传与审核配额、站内告警、worker 汇总和 `admin/usage/status`；本分支未应用远端迁移 |
+
 ---
 
 ## 待领取任务
@@ -52,17 +58,6 @@
 - 视频分片同样走该代理
 - **验收文档中写明实际失效延迟**，不承诺"即时撤权"
 - 已下载文件无法收回，这一点必须保留在用户告知中
-
-### T-B09｜用量护栏与告警
-**优先级**：中
-**依赖**：无
-**输入**：`08-operations.md` 8.4
-**产出**：`assets/intent` 的日配额检查；统计集合 + 定时汇总任务
-**DoD**
-- 单用户日上传量超阈值 → `rate_limited`
-- 全社团日上传量超阈值 → 暂停上传，但**不影响读取**
-- 审核调用量接近配额时写告警通知给管理员
-- 阈值可通过 `hg_club_config` 调整，不硬编码
 
 ### T-B10｜申诉工单
 **优先级**：中
@@ -159,7 +154,7 @@
 | `shared/presenters.js` | 空闲 | 新增字段需同步前端 `docs/04` 的 DTO 示例 |
 | `shared/db.js` | T-B12（对账） | 不得加入业务权限判断 |
 | `cloudfunctions/api/index.js` | 各任务 | 只 append 自己的 action，不重排已有条目 |
-| `worker/index.js` | T-B09、T-B12 | 新增 mode 时不改已有分支 |
+| `worker/index.js` | T-B12 | 新增 mode 时不改已有分支 |
 | `docs/04-api-contract.md` | 各任务 | 新增 action 必须同步此文件 **与前端 docs/04** |
 
 ## 新任务收尾检查单

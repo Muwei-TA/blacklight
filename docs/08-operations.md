@@ -80,14 +80,22 @@ CloudBase 控制台可看的：调用次数、错误率、耗时、并发。
 | 幂等键 7 天清理 | 同上 |
 | 单文件大小限制（服务端复核） | `worker/tasks/media.js` |
 | 频次限制（入社申请等） | `shared/session.js checkRateLimit` |
+| 用户/社团日上传额度 | `hg_image_intent` 原子检查；有效 intent 预留容量，已上传字节用 `quotaChargedAt` 持久计量 |
+| 审核日调用额度与管理员告警 | 每个 `msgSecCheck` 分片、`imgSecCheck` 前原子计数；跨过阈值时按社团/UTC日只写一次管理员站内通知 |
+| 用量状态汇总 | `hg_daily_usage` + worker `usage` mode；`admin/usage/status` 仅 moderator/admin 可查 |
 
-**未实现（任务 T-B09）**
+`hg_club_config.usageLimits`：
 
-| 措施 | 说明 |
-|---|---|
-| 日上传量阈值 | 超限暂停上传，但**不暂停用户读取自己的文字** |
-| 云用量告警 | 控制台配置预算告警 |
-| 审核调用配额监控 | 接近配额时收紧发布 |
+```json
+{
+  "userUploadDailyBytes": 20971520,
+  "clubUploadDailyBytes": 209715200,
+  "reviewDailyCalls": 1000,
+  "warningRatio": 0.8
+}
+```
+
+迁移仅为缺失字段填入上述开发默认值，不覆盖已有值。个人 20 MiB 保持既有滚动 24 小时口径；社团总额按 UTC 日统计。限额设为 `0` 会关闭对应上传或自动审核调用；类型非法或负值 fail-closed。上传额度耗尽只拒绝新上传，不影响读取；审核硬上限会停止新的外部检查，将任务留在 queued 并安排到下一 UTC 日窗口，不增加失败次数。云平台账单预算告警仍需在 CloudBase 控制台单独配置。
 
 成本结构参考（前端工程书 `docs/15` 15.2 的用量模型）：
 
@@ -114,11 +122,9 @@ CloudBase 控制台可看的：调用次数、错误率、耗时、并发。
 
 ## 8.6 定时任务
 
-```json
-{ "name": "review-tick", "type": "timer", "config": "0 * * * * * *" }
-```
+唯一触发器来源是 `cloudfunctions/worker/config.json` 中的每分钟 timer。微信开发者工具选择 `heiguang-shudong` 项目，在 `worker` 云函数执行“上传触发器”；运行来源应由平台注入 `TCB_SOURCE=wx_trigger`、`TRIGGER_SRC=tcb` 并匹配当前小程序 AppID 与无 OPENID。不要在控制台测试面板伪造 timer event；普通事件不能证明受信定时来源。
 
-每分钟触发 `worker`，单次处理 `BATCH_SIZE = 10` 个任务。
+每分钟触发 `worker`，单次最多处理 `BATCH_SIZE = 10` 个审核任务，并汇总当日用量。当前开发环境已用真实 timer 将审核样本推进为 `published/passed`、`attempts=0`；本分支新增的用量迁移和状态逻辑尚未部署或云端验收。
 
 **抢占机制**：worker 用乐观更新把任务从 `queued` 改为 `running`，
 只有更新成功的实例才处理该任务 —— 因此多实例并发触发也不会重复执行。
@@ -126,15 +132,6 @@ CloudBase 控制台可看的：调用次数、错误率、耗时、并发。
 调整频率与批量的依据：
 - 审核积压增长 → 提高 `BATCH_SIZE` 或缩短间隔
 - 函数超时（60s）→ 降低 `BATCH_SIZE`
-
-手动触发某类任务：
-
-```js
-// 控制台「云函数 → 测试」传入
-{ "mode": "cleanup" }     // 只跑清理
-{ "mode": "digest" }      // 只跑共鸣聚合
-{ "mode": "review", "limit": 30 }
-```
 
 ## 8.7 数据库备份
 

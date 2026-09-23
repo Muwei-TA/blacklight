@@ -24,6 +24,7 @@ const constants = {
   POST_STATUS: { DELETED: 'deleted' },
   REVIEW_TASK_STATUS: { PASSED: 'passed', FAILED: 'failed', QUEUED: 'queued' },
   CONTENT_LIMITS: { videoSize: 20 * 1024 * 1024 },
+  DEFAULT_CLUB_ID: 'heiguang',
 };
 
 function loadVm(relativePath, mocks) {
@@ -295,11 +296,14 @@ test('signReadableAssets re-signs only currently readable post assets and never 
 
 test('media verification update is guarded by the observed status and fileId', async () => {
   const updates = [];
+  const usageCalls = [];
+  let denyQuota = false;
+  let imageCheckCalls = 0;
   const asset = { _id: 'asset-media', mediaType: 'image', status: 'uploaded', fileId: 'file-v1' };
   const cloud = {
     async getTempFileURL() { return { fileList: [{ status: 0, tempFileURL: 'unused' }] }; },
     async downloadFile() { return { fileContent: Buffer.from('jpeg') }; },
-    openapi: () => ({ security: { async imgSecCheck() {} } }),
+    openapi: () => ({ security: { async imgSecCheck() { imageCheckCalls += 1; } } }),
   };
   const db = {
     getCloud: () => cloud,
@@ -322,6 +326,17 @@ test('media verification update is guarded by the observed status and fileId', a
     'wx-server-sdk': cloud,
     '../shared/constants': constants,
     '../shared/db': db,
+    '../shared/usage': {
+      async reserveReviewCall(kind, clubId) {
+        usageCalls.push({ kind, clubId });
+        if (denyQuota) throw Object.assign(new Error('limit'), { code: 'USAGE_QUOTA', nextAttemptAt: '2026-09-24T00:00:00.000Z' });
+      },
+      waitingForQuota(error) {
+        return error.code === 'USAGE_QUOTA' ? {
+          status: 'queued', waitingReason: 'usage_quota', nextAttemptAt: new Date(error.nextAttemptAt),
+        } : null;
+      },
+    },
     '../shared/image-processing': {
       ImageProcessingError,
       JPEG_MIME: 'image/jpeg',
@@ -333,6 +348,16 @@ test('media verification update is guarded by the observed status and fileId', a
   const result = await media.processAsset({ targetId: asset._id });
   assert.equal(result.status, 'passed');
   assert.equal(updates.length, 1);
+  assert.deepEqual(usageCalls, [{ kind: 'image', clubId: 'heiguang' }]);
   assert.deepEqual(JSON.parse(JSON.stringify(updates[0].condition)), { _id: 'asset-media', status: 'uploaded', fileId: 'file-v1' });
   assert.equal(updates[0].data.status, 'verified');
+  assert.equal(imageCheckCalls, 1);
+
+  denyQuota = true;
+  const waiting = await media.processAsset({ targetId: asset._id });
+  assert.equal(waiting.status, 'queued');
+  assert.equal(waiting.waitingReason, 'usage_quota');
+  assert.equal(new Date(waiting.nextAttemptAt).toISOString(), '2026-09-24T00:00:00.000Z');
+  assert.equal(imageCheckCalls, 1, 'quota denial prevents the next imgSecCheck call');
+  assert.equal(updates.length, 1, 'quota wait does not change the asset review state');
 });

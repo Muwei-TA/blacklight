@@ -89,11 +89,13 @@ function isWaitingResult(result) {
 }
 
 function buildWaitingUpdate(result, now = Date.now(), waitMs = DEFAULT_WAIT_MS) {
+  const requestedNextAttempt = toMillis(result && result.nextAttemptAt);
   return {
     status: 'queued',
     note: result && result.note ? String(result.note).slice(0, 300) : 'waiting for dependency',
     waitingReason: result && result.waitingReason ? String(result.waitingReason).slice(0, 100) : 'dependency',
-    nextAttemptAt: new Date(nowMillis(now) + waitMs),
+    nextAttemptAt: new Date(requestedNextAttempt && requestedNextAttempt > nowMillis(now)
+      ? requestedNextAttempt : nowMillis(now) + waitMs),
     lastError: '',
     finishedAt: null,
     ...clearLeaseFields(),

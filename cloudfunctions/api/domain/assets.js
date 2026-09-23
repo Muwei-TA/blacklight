@@ -22,8 +22,6 @@ const {
 } = require('../shared/image-processing');
 
 const INTENT_TTL_MS = 15 * 60 * 1000;
-const MAX_PENDING_INTENTS = 3;
-const DAILY_IMAGE_QUOTA_BYTES = 20 * 1024 * 1024;
 // Keep the public asset status enum unchanged. An intent with uploadStartedAt
 // set is already claimed, while status `intent` remains visible to the
 // existing cleanup worker and can still expire safely.
@@ -55,6 +53,7 @@ async function imageRpc(name, args) {
   try { return await db.getDb().rpc(name, args); } catch (err) {
     if (/IMAGE_EXPIRED/.test(err.message)) throw errors.invalidInput('上传已过期，请重新选择图片', { code: 'image_expired' });
     if (/IMAGE_QUOTA/.test(err.message)) throw errors.rateLimited({ reason: 'image quota reached' });
+    if (/CLUB_UPLOAD_QUOTA/.test(err.message)) throw errors.rateLimited({ reason: 'club upload quota reached' });
     if (/IMAGE_NOT_FOUND/.test(err.message)) throw errors.notAccessible();
     if (/IMAGE_/.test(err.message)) throw errors.conflict('图片状态已变化或请求处理中，请稍后重试');
     throw err;
@@ -68,13 +67,15 @@ async function createIntent(payload, ctx) {
   const assetId = crypto.randomUUID();
   const createdAt = db.serverDate();
   const asset = {
-    _id: assetId, ownerId: ctx.viewer.userId, mediaType: 'image', declaredSize: input.size,
+    _id: assetId, ownerId: ctx.viewer.userId, clubId: ctx.viewer.clubId, mediaType: 'image', declaredSize: input.size,
     quotaBytes: MAX_DECODED_BYTES, declaredDuration: 0, mimeType: input.mimeType,
     status: ASSET_STATUS.INTENT, postId: '', postVersion: 0, fileId: '', cleanedFileId: '',
     cloudPath: buildStoragePath(), expiresAt: new Date(nowMillis()+INTENT_TTL_MS).toISOString(),
     reviewTaskId: '', tempFileURL: '', coverURL: '', createdAt, updatedAt: createdAt,
   };
-  return imageRpc('hg_image_intent', { p_owner: ctx.viewer.userId, p_key: key, p_asset: asset });
+  return imageRpc('hg_image_intent', {
+    p_owner: ctx.viewer.userId, p_club_id: ctx.viewer.clubId, p_key: key, p_asset: asset,
+  });
 }
 
 async function findOwnedIntent(assetId, ctx) {
@@ -119,6 +120,7 @@ async function uploadImage(payload, ctx) {
     status: ASSET_STATUS.UPLOADED, fileId, cleanedFileId: fileId,
     actualSize: cleaned.actualSize, cleanedSize: cleaned.cleanedSize,
     quotaBytes: Math.max(cleaned.actualSize, cleaned.cleanedSize),
+    quotaChargedAt: db.serverDate(),
     width: cleaned.width, height: cleaned.height, sourceMimeType: cleaned.sourceMimeType,
     cleanedMimeType: JPEG_MIME, cleanedAt: db.serverDate(), updatedAt: db.serverDate(),
     uploadLeaseUntil: null,
@@ -181,8 +183,6 @@ async function signReadableAssets(assets, posts, ctx) {
 
 module.exports = {
   signReadableAssets,
-  MAX_PENDING_INTENTS,
-  DAILY_IMAGE_QUOTA_BYTES,
   buildStoragePath,
   createIntent,
   uploadImage,

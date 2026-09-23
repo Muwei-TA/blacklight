@@ -19,7 +19,7 @@
 | 01 | `01-decisions.md` | 技术选型决策记录、边界、G0 阻断项 | ✅ |
 | 02 | `02-architecture.md` | 分层、目录、shared 同步机制、编码规范 | ✅ |
 | 03 | `03-data-model.md` | 21 个集合的字段、索引、权限设置 | ✅ |
-| 04 | `04-api-contract.md` | 44 个 action 的入参、返回、错误码 | ✅ |
+| 04 | `04-api-contract.md` | 57 个 action 的入参、返回、错误码 | ✅ |
 | 05 | `05-authorization.md` | 鉴权实现、越权防线、匿名隔离 | ✅ **最高优先级** |
 | 06 | `06-media-pipeline.md` | 上传链路、内容审核、回调、撤权窗口 | |
 | 07 | `07-governance.md` | 状态机、举报申诉、审计、注销与保留 | |
@@ -47,6 +47,7 @@
 | 后台任务 | `cloudfunctions/worker/tasks/*.js` | ✅ 审核/图片/聚合/清理 |
 | 审核回调 | `cloudfunctions/review-callback/` | ✅ 验签/去重/防旧覆盖新 |
 | 初始化与部署脚本 | `scripts/*.mjs` | ✅ |
+| 用量护栏 T-B09 | `cloudbase/migrations/*_usage_quotas.sql`、`shared/usage.js`、`worker/tasks/usage.js` | ✅ 本地实现；迁移与函数待部署验收 |
 
 **未实现 / 需要真实环境才能完成**
 

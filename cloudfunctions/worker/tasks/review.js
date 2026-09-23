@@ -14,14 +14,16 @@ const {
   POST_STATUS,
   REVIEW_TASK_STATUS,
   ASSET_STATUS,
+  DEFAULT_CLUB_ID,
 } = require('../shared/constants');
 const db = require('../shared/db');
+const usage = require('../shared/usage');
 
 /**
  * 文本安全检查。
  * @returns {{ pass: boolean, suspect: boolean, label?: string }}
  */
-async function checkText(content, openid) {
+async function checkText(content, openid, clubId = DEFAULT_CLUB_ID) {
   if (!content || !content.trim()) return { pass: true, suspect: false };
   // Every character must be reviewed. Long articles cannot silently bypass
   // review after the first 2500 characters. Overlap preserves boundary context.
@@ -29,6 +31,7 @@ async function checkText(content, openid) {
   for (let offset = 0; offset < chars.length; offset += 2300) {
     const chunk = chars.slice(offset, offset + 2500).join('');
     let res;
+    await usage.reserveReviewCall('text', clubId);
     try {
       res = await cloud.openapi({ appid: process.env.MINIPROGRAM_APP_ID }).security.msgSecCheck({ version: 2, openid, scene: 2, content: chunk });
     } catch (err) {
@@ -114,7 +117,14 @@ async function reviewPost(task) {
   const openid = owner && owner.wxOpenIdRef;
   const textToCheck = `${post.title || ''}\n${post.body || ''}`.trim();
 
-  const result = await checkText(textToCheck, openid);
+  let result;
+  try {
+    result = await checkText(textToCheck, openid, post.clubId || DEFAULT_CLUB_ID);
+  } catch (error) {
+    const waiting = usage.waitingForQuota(error);
+    if (waiting) return waiting;
+    throw error;
+  }
 
   if (result.suspect) {
     // 存疑转人工复核，内容仍不公开
@@ -139,7 +149,14 @@ async function reviewComment(task) {
   }
 
   const owner = await db.findOneById(COLLECTIONS.users, comment.ownerId);
-  const result = await checkText(comment.body, owner && owner.wxOpenIdRef);
+  let result;
+  try {
+    result = await checkText(comment.body, owner && owner.wxOpenIdRef, comment.clubId || DEFAULT_CLUB_ID);
+  } catch (error) {
+    const waiting = usage.waitingForQuota(error);
+    if (waiting) return waiting;
+    throw error;
+  }
 
   if (result.suspect) return { status: REVIEW_TASK_STATUS.MANUAL, note: 'suspect comment' };
 
