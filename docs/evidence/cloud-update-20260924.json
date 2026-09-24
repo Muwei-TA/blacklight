@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-24",
+  "environment": "shudong-d4g4blap4a5069a28",
+  "migrationTask": {
+    "id": "task-1cbbec3c",
+    "status": "Succeed",
+    "remoteCountAfter": 16,
+    "newVersions": [
+      "20260924080000_invite_auto_join",
+      "20260924090000_admin_todo_notifications"
+    ]
+  },
+  "apiFunction": {
+    "deploymentTask": "confirmation_cloud_fn_deploy_34d7deab-1d90-403e-ba6a-474dab3f97f6",
+    "deploymentResult": "success",
+    "statusAfter": "Active",
+    "modifiedAt": "2026-09-24 08:29:32"
+  },
+  "simulatorCloudReads": {
+    "sessionMemberStatus": "active",
+    "myPageMemberState": true,
+    "adminMemberQueue": "allowed",
+    "adminMemberQueueItems": 0,
+    "adminMemberQueueError": false,
+    "systemNotificationsReadable": true,
+    "systemNotificationCount": 11,
+    "simulatorConsoleErrorMatch": false
+  },
+  "verificationBoundary": [
+    "Simulator used the current developer account, not the separate test user.",
+    "No fresh invitation or moderator task was submitted to the live environment during this check.",
+    "The WeChat experience version was not uploaded."
+  ]
+}
