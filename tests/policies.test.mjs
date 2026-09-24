@@ -163,6 +163,34 @@ test('只有作者能删除内容', () => {
   assert.equal(policies.canDeletePost(admin, makePost()), false);
 });
 
+test('只有评论者能删除自己的回应', () => {
+  const makeComment = (overrides = {}) => ({
+    _id: 'c1',
+    postId: 'p1',
+    ownerId: 'u_member',
+    replyToId: '',
+    body: '回应',
+    identityMode: 'named',
+    status: POST_STATUS.PUBLISHED,
+    version: 1,
+    ...overrides,
+  });
+
+  assert.equal(policies.canDeleteComment(member, makeComment()), true);
+  // 他人与管理员都不可删：管理员走隐藏流程
+  assert.equal(policies.canDeleteComment(other, makeComment()), false);
+  assert.equal(policies.canDeleteComment(admin, makeComment()), false);
+  assert.equal(policies.canDeleteComment(guest, makeComment()), false);
+  // 已删除的不能重复删；待审的可以（作者撤回笔误）
+  assert.equal(policies.canDeleteComment(member, makeComment({ status: POST_STATUS.DELETED })), false);
+  assert.equal(policies.canDeleteComment(member, makeComment({ status: POST_STATUS.PENDING })), true);
+  // 匿名回应按文档归属判断，不按展示别名
+  assert.equal(
+    policies.canDeleteComment(member, makeComment({ identityMode: 'anonymous', ownerId: 'u_member' })),
+    true,
+  );
+});
+
 test('只有有效且未禁言的作者能重提被退回内容', () => {
   const rejected = makePost({ status: POST_STATUS.REJECTED });
   assert.equal(policies.canResubmitRejectedPost(member, rejected, { publishing: true }), true);

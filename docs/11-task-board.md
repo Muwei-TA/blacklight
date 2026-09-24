@@ -24,6 +24,7 @@
 | ID | 内容 | 产出 |
 |---|---|---|
 | T-B09 | 用量护栏与告警 | 新增 PostgreSQL migration、配置化用户/社团上传与审核配额、站内告警、worker 汇总和 `admin/usage/status`；本分支未应用远端迁移 |
+| T-B14 | 回应共鸣与评论者删除 | `shared/policies.js` 新增 `canDeleteComment`/`computeCommentViewerFlags`；`shared/presenters.js` 评论 DTO 增加 `version/counters/viewer` 与墓碑形态；`domain/posts.js` 新增 `posts/comments/reaction`、`posts/comments/delete`（版本锁软删除 + `commentCount` 回收 + 回应共鸣记录回收），`listComments` 返回本人共鸣标记与墓碑；worker 共鸣聚合排除回应级记录；migration `20260925100000_comment_reactions.sql`（`hg_comments` 按帖索引 + `hg_reactions.commentId` 部分索引）待云端执行 |
 
 ---
 

@@ -34,7 +34,7 @@
 **关键规则**：`not_accessible` 用于"无权"和"不存在"两种情况，
 返回体完全相同，防止通过错误文案差异探测私密内容是否存在。
 
-## 4.3 action 清单（57 个）
+## 4.3 action 清单（60 个）
 
 ### 会话与成员资格
 
@@ -73,6 +73,8 @@
 | `posts/bookmark` | `{ id, next: bool }` | `{ ok }` | `canInteract` |
 | `posts/comments/list` | `{ id }` | `{ items, nextCursor }` | `canReadPost` |
 | `posts/comments/create` | `{ id, body, replyToId?, identityMode, idempotencyKey }` | `{ id, state: 'pending' }` | `canComment` |
+| `posts/comments/reaction` | `{ id, commentId, next: bool }` | `{ ok }` | `canInteract`；仅 `published` 回应 |
+| `posts/comments/delete` | `{ id, commentId, expectedVersion }` | `{ ok }` | 评论者本人（`canDeleteComment`） |
 | `me/contents` | `{ tab, cursor? }` | `{ items, nextCursor }` | 已登录 |
 | `reports/create` | `{ targetType, targetId, reason, evidence? }` | `{ receiptId, state }` | 已登录 |
 
@@ -96,6 +98,27 @@
 
 返回 `state`：`private_saved`（仅自己，直接保存）或 `pending`（进入审核）。
 **绝不返回表示"已公开"的状态** —— 那要等审核通过。
+
+**回应（评论）DTO 与删除语义**（posts/comments/list 返回的每条评论/回复）：
+
+```jsonc
+{
+  "id": "c1",
+  "author": { "userId": "u_a", "displayName": "南枝", "isAnonymous": false, "alias": null, "isAuthor": false },
+  "body": "回应正文",
+  "createdAtText": "刚刚",
+  "status": "published",
+  "version": 1,
+  "counters": { "reactions": 2 },
+  "viewer": { "reacted": false, "canDelete": false },
+  "replies": []
+}
+```
+
+1. `viewer.*` 由服务端计算（`computeCommentViewerFlags`）：`canDelete` 仅对评论者本人为 `true`，与回应是否匿名无关；前端不得自行推断归属。
+2. `canDelete` 覆盖 `pending` 与 `published`：作者可在审核通过前后删除自己的回应（待审项本人可见）。
+3. 删除是软删除：`status: 'deleted'`。已删除的定向回复不再返回；已删除的一级回应若仍有可见回复，以墓碑 DTO 返回（`deleted: true`、固定文案「这条回应已被删除。」、无作者信息），否则整条隐藏。
+4. 回应共鸣复用 `hg_reactions`，`_id = {userId}:comment:{commentId}`，文档带 `postId` + `commentId`；worker 的共鸣聚合只统计无 `commentId` 的记录，帖子删除时按 `postId` 一并回收。
 
 **`me/contents` 的 tab**：`published` / `pending` / `private` / `bookmark`。
 `bookmark` 会逐条复核权限，失效项返回
@@ -214,6 +237,8 @@
 |---|---|
 | `posts/create` | `Idempotency-Key` → `hg_idempotency`，重放返回首次结果 |
 | `posts/comments/create` | 同上 |
+| `posts/comments/reaction` | `_id = {userId}:comment:{commentId}`，天然幂等 |
+| `posts/comments/delete` | `expectedVersion` 版本锁，重复提交抛 `conflict` |
 | `posts/reaction` / `posts/bookmark` | `_id = {userId}:{postId}`，天然幂等 |
 | `admin/*/decide` | `expectedVersion` 版本锁，重复提交抛 `conflict` |
 

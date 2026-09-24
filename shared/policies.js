@@ -143,6 +143,13 @@ function canDeletePost(viewer, post) {
   return isOwner(viewer, post);
 }
 
+/** 评论者可删自己的回应；管理员走隐藏流程，不使用删除。待审/已发布均可删。 */
+function canDeleteComment(viewer, comment) {
+  if (!comment) return false;
+  if (comment.status === POST_STATUS.DELETED) return false;
+  return !!viewer.userId && comment.ownerId === viewer.userId;
+}
+
 /** 退回内容只允许仍有发布资格的作者修改后重新送审。 */
 function canResubmitRejectedPost(viewer, post, capabilities) {
   return !!post && post.status === POST_STATUS.REJECTED && isOwner(viewer, post)
@@ -284,6 +291,17 @@ function computePostViewerFlags(viewer, post, { reacted = false, bookmarked = fa
   };
 }
 
+/**
+ * 计算某条回应对当前 viewer 的 viewer.* 字段。
+ * 前端只按这些字段渲染，不自行推断（匿名回应同样不能由客户端判断归属）。
+ */
+function computeCommentViewerFlags(viewer, comment, { reacted = false } = {}) {
+  return {
+    reacted,
+    canDelete: canDeleteComment(viewer, comment),
+  };
+}
+
 module.exports = {
   buildViewer,
   GUEST_VIEWER,
@@ -294,6 +312,7 @@ module.exports = {
   canComment,
   canChangeVisibility,
   canDeletePost,
+  canDeleteComment,
   canResubmitRejectedPost,
   canReportPost,
   canCreatePost,
@@ -314,5 +333,6 @@ module.exports = {
   canRevealAnonymousMapping,
   canReadPrivateNoteOfOthers,
   computePostViewerFlags,
+  computeCommentViewerFlags,
   VISIBILITY_RANK,
 };

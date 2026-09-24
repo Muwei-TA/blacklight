@@ -8,7 +8,7 @@
  */
 
 const { IDENTITY_MODE, POST_STATUS, VISIBILITY } = require('./constants');
-const { computePostViewerFlags } = require('./policies');
+const { computePostViewerFlags, computeCommentViewerFlags } = require('./policies');
 
 function toMillis(value) {
   if (!value) return 0;
@@ -166,10 +166,26 @@ function presentPostDetail(post, context = {}) {
   };
 }
 
-/** 评论 DTO。匿名评论同样不返回 userId。 */
+/** 评论 DTO。匿名评论同样不返回 userId。
+ * 已删除的一级回应以墓碑呈现：不携带原文与作者信息，仅在有可见回复时占位。
+ */
 function presentComment(comment, context = {}) {
   const { authorUser, alias, isAuthor = false, now, replies = [] } = context;
   const anonymous = comment.identityMode === IDENTITY_MODE.ANONYMOUS;
+  if (comment.status === POST_STATUS.DELETED) {
+    return {
+      id: comment._id,
+      author: { userId: null, displayName: null, isAnonymous: false, alias: null, isAuthor: false },
+      body: '这条回应已被删除。',
+      createdAtText: formatRelativeTime(comment.createdAt, now),
+      status: comment.status,
+      deleted: true,
+      version: comment.version || 1,
+      counters: { reactions: 0 },
+      viewer: { reacted: false, canDelete: false },
+      replies,
+    };
+  }
   return {
     id: comment._id,
     author: {
@@ -182,6 +198,9 @@ function presentComment(comment, context = {}) {
     body: comment.body,
     createdAtText: formatRelativeTime(comment.createdAt, now),
     status: comment.status,
+    version: comment.version || 1,
+    counters: { reactions: comment.reactionCount || 0 },
+    viewer: computeCommentViewerFlags(context.viewer, comment, { reacted: context.reacted }),
     replies,
   };
 }
