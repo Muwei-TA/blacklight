@@ -24,6 +24,8 @@
 | ID | 内容 | 产出 |
 |---|---|---|
 | T-B09 | 用量护栏与告警 | 新增 PostgreSQL migration、配置化用户/社团上传与审核配额、站内告警、worker 汇总和 `admin/usage/status`；本分支未应用远端迁移 |
+| T-B18 | 请求链路性能优化与写路径正确性修复（无 action 契约变更） | **性能**：`shared/session.js` resolveContext 并行取 clubConfig 与用户；`domain/posts.js` listComments/createPost/toggle 系列并行化并对双击竞态做幂等；`domain/session.js` publicProfile 三路并行——每次请求减少 1–2 次 PG 串行往返。**正确性**：`domain/collections.js` submit 的 consent 改幂等 upsert（撤回后可重投）、revokeConsent 去除两处吞错（失败可见，updated===0 返回 conflict）；`domain/topics.js` myFollows 返回真实 nextCursor（原固定 null 导致超一页不可达）；`worker/index.js` 心跳写改用 DEFAULT_CLUB_ID。**工具**：`scripts/check.mjs` 新增 [6/6] 跨仓库契约漂移检查（前端 transport action ↔ api 路由表，../前端 缺失时跳过）。**迁移**：`20260925120000_hot_path_indexes.sql` 补 reactions(userId,postId)、bookmarks(userId,createdAt)、notifications(recipientId,createdAt)、topic_follows(userId) 热路径读索引（纯追加，需 `tcb db pg migration up` 应用，先 --dry-run）。需重部署 api/worker 生效 |
+| T-B14 | 回应共鸣与评论者删除 | `shared/policies.js` 新增 `canDeleteComment`/`computeCommentViewerFlags`；`shared/presenters.js` 评论 DTO 增加 `version/counters/viewer` 与墓碑形态；`domain/posts.js` 新增 `posts/comments/reaction`、`posts/comments/delete`（版本锁软删除 + `commentCount` 回收 + 回应共鸣记录回收），`listComments` 返回本人共鸣标记与墓碑；worker 共鸣聚合排除回应级记录；migration `20260925100000_comment_reactions.sql`（`hg_comments` 按帖索引 + `hg_reactions.commentId` 部分索引）待云端执行 |
 
 ---
 
@@ -151,6 +153,7 @@
 
 | 文件 | 当前持有 | 说明 |
 |---|---|---|
+| `shared/session.js` | T-B18（请求链路并行化） | resolveContext 并行取 clubConfig 与用户，行为不变 |
 | `shared/policies.js` | T-B11（禁言判断） | **改动必须先加单测**；被所有函数共享 |
 | `shared/constants.js` | 空闲 | 新增枚举需同步前端 `docs/01` 术语表 |
 | `shared/presenters.js` | 空闲 | 新增字段需同步前端 `docs/04` 的 DTO 示例 |

@@ -109,20 +109,35 @@ async function submit(payload, ctx) {
     });
   }
 
-  // 授权与用途、版本绑定；不写"永久不可撤销"的笼统同意
-  await db.coll(COLLECTIONS.consents).add({
-    data: {
-      _id: `${postId}:collection:${collectionId}`,
-      postId,
-      collectionId,
-      ownerId: ctx.viewer.userId,
-      version: consentVersion,
-      purpose: 'collection_display',
-      scope: collection.visibility,
-      grantedAt: db.serverDate(),
-      revokedAt: null,
-    },
-  }).catch(() => {});
+  // 授权与用途、版本绑定；不写"永久不可撤销"的笼统同意。
+  // 幂等 upsert：重复投稿或撤回后重投时恢复授权（revokedAt 置空），
+  // 而不是撞 _id 后静默失败——否则撤回过的作者永远无法重新授权。
+  const consentId = `${postId}:collection:${collectionId}`;
+  const grantedAt = db.serverDate();
+  try {
+    await db.coll(COLLECTIONS.consents).add({
+      data: {
+        _id: consentId,
+        postId,
+        collectionId,
+        ownerId: ctx.viewer.userId,
+        version: consentVersion,
+        purpose: 'collection_display',
+        scope: collection.visibility,
+        grantedAt,
+        revokedAt: null,
+      },
+    });
+  } catch (err) {
+    if (!/23505|duplicate key/i.test(`${err.code || ''} ${err.message || ''}`)) throw err;
+    const renewed = await db
+      .coll(COLLECTIONS.consents)
+      .where({ _id: consentId, ownerId: ctx.viewer.userId })
+      .update({ data: { version: consentVersion, scope: collection.visibility, grantedAt, revokedAt: null } });
+    if (!renewed.stats || renewed.stats.updated !== 1) {
+      throw errors.conflict('授权状态已变化，请刷新后重试', { field: 'postId' });
+    }
+  }
 
   await db.coll(COLLECTIONS.reviewTasks).add({
     data: {
@@ -150,17 +165,22 @@ async function revokeConsent(payload, ctx) {
   if (!post) throw errors.notAccessible({ postId });
   if (!policies.isOwner(ctx.viewer, post)) throw errors.forbidden({ reason: 'not owner' });
 
-  await db
+  // 撤回是隐私控制：写失败必须可见，禁止吞错后返回"已撤回"。
+  // updated === 0 说明本人从未授权过，无从撤回。
+  const revoked = await db
     .coll(COLLECTIONS.consents)
     .where({ postId, ownerId: ctx.viewer.userId })
-    .update({ data: { revokedAt: db.serverDate() } })
-    .catch(() => {});
+    .update({ data: { revokedAt: db.serverDate() } });
+  if (!revoked.stats || revoked.stats.updated === 0) {
+    throw errors.conflict('没有可撤回的文集授权', { field: 'postId' });
+  }
 
+  // 目录立即移除；失败时整个请求报错，重试是幂等的
+  // （consent 重复 update 仍算 1 行，entries 已删则 remove 0 行不抛错）。
   await db
     .coll(COLLECTIONS.collectionEntries)
     .where({ postId })
-    .remove()
-    .catch(() => {});
+    .remove();
 
   await db.writeAudit({
     actorId: ctx.viewer.userId,

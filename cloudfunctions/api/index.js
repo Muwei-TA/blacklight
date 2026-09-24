@@ -44,6 +44,8 @@ const handlers = {
   'posts/bookmark': posts.toggleBookmark,
   'posts/comments/list': posts.listComments,
   'posts/comments/create': posts.createComment,
+  'posts/comments/reaction': posts.toggleCommentReaction,
+  'posts/comments/delete': posts.deleteComment,
   'me/contents': posts.listMyContents,
   'reports/create': posts.createReport,
 

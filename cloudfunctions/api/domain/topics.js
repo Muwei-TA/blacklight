@@ -175,13 +175,17 @@ async function myFollows(payload, ctx) {
     COLLECTIONS.topics,
     follows.items.map((f) => f.topicId),
   );
+  // 关注列表是本人数据，无计数泄露面；话题可读性在这里复核即可
   const readable = topics.filter((t) => policies.canReadTopic(ctx.viewer, t));
 
   return {
     items: readable.map((topic) =>
       presenters.presentTopic(topic, { viewer: ctx.viewer, statsText: buildStatsText(topic), followed: true }),
     ),
-    nextCursor: null,
+    // 游标基于 follows（本人数据）而非展示结果，被过滤的话题不会造成分页断头
+    nextCursor: follows.hasMore && follows.items.length > 0
+      ? validators.buildCursor(follows.items[follows.items.length - 1])
+      : null,
   };
 }
 

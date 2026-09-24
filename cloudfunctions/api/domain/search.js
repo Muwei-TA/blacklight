@@ -59,27 +59,27 @@ async function search(payload, ctx) {
     ? { visibility: _.in([VISIBILITY.PUBLIC, VISIBILITY.CLUB]) }
     : { visibility: VISIBILITY.PUBLIC };
 
-  const res = await db
-    .coll(COLLECTIONS.posts)
-    .where(
-      _.and([
-        { status: POST_STATUS.PUBLISHED },
-        scopeWhere,
-        // 只匹配正文与标题；作者昵称不参与匹配，
-        // 否则搜真实昵称就能反查出该用户的匿名帖
-        _.or([{ title: pattern }, { body: pattern }]),
-      ]),
-    )
-    .orderBy('createdAt', 'desc')
-    .limit(pageSize)
-    .get()
-    .catch(() => ({ data: [] }));
+  // 游标分页（权限条件在 where 内，分页边界不泄露内容存在性）。
+  // 只匹配正文与标题；作者昵称不参与匹配，
+  // 否则搜真实昵称就能反查出该用户的匿名帖
+  const where = {
+    status: POST_STATUS.PUBLISHED,
+    ...scopeWhere,
+    $or: [{ title: pattern }, { body: pattern }],
+  };
+  const { items, hasMore } = await db.paginate(COLLECTIONS.posts, where, {
+    cursor: validators.parseCursor(payload.cursor),
+    pageSize,
+  });
 
   // 二次复核（防御性：即使 where 写错，也不会漏出）
-  const readable = (res.data || []).filter((post) => policies.canListPost(ctx.viewer, post));
+  const readable = items.filter((post) => policies.canListPost(ctx.viewer, post));
   const cards = await posts.hydrateCards(readable, ctx);
 
-  return { items: cards, nextCursor: null };
+  return {
+    items: cards,
+    nextCursor: hasMore && items.length > 0 ? validators.buildCursor(items[items.length - 1]) : null,
+  };
 }
 
 /**
@@ -96,24 +96,24 @@ async function suggestions(payload, ctx) {
 async function searchPrivate(payload, ctx) {
   if (!ctx.viewer.isAuthenticated) throw errors.unauthenticated();
   const q = validators.validateSearchQuery(payload.q);
-  const _ = db.command();
   const pattern = db.getDb().RegExp({ regexp: escapeRegex(q), options: 'i' });
 
-  const res = await db
-    .coll(COLLECTIONS.posts)
-    .where(
-      _.and([
-        { ownerId: ctx.viewer.userId, visibility: VISIBILITY.PRIVATE, status: POST_STATUS.PUBLISHED },
-        _.or([{ title: pattern }, { body: pattern }]),
-      ]),
-    )
-    .orderBy('createdAt', 'desc')
-    .limit(validators.clampPageSize(payload.pageSize))
-    .get()
-    .catch(() => ({ data: [] }));
+  const { items, hasMore } = await db.paginate(
+    COLLECTIONS.posts,
+    {
+      ownerId: ctx.viewer.userId,
+      visibility: VISIBILITY.PRIVATE,
+      status: POST_STATUS.PUBLISHED,
+      $or: [{ title: pattern }, { body: pattern }],
+    },
+    { cursor: validators.parseCursor(payload.cursor), pageSize: validators.clampPageSize(payload.pageSize) },
+  );
 
   const posts = require('./posts');
-  return { items: await posts.hydrateCards(res.data || [], ctx), nextCursor: null };
+  return {
+    items: await posts.hydrateCards(items, ctx),
+    nextCursor: hasMore && items.length > 0 ? validators.buildCursor(items[items.length - 1]) : null,
+  };
 }
 
 module.exports = { search, suggestions, searchPrivate, escapeRegex };

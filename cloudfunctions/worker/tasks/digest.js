@@ -18,7 +18,8 @@ async function buildReactionDigests() {
 
   const res = await db
     .coll(COLLECTIONS.reactions)
-    .where({ createdAt: _.gte(since), digested: _.neq(true) })
+    // commentId 存在的记录是回应级共鸣，不进入原帖共鸣聚合
+    .where({ createdAt: _.gte(since), digested: _.neq(true), commentId: _.exists(false) })
     .limit(200)
     .get()
     .catch(() => ({ data: [] }));

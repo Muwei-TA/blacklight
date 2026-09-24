@@ -99,6 +99,8 @@ idx_feed: clubId + status + visibility + createdAt(-1)
 
 **`hg_reactions` / `hg_bookmarks`**：`_id` 为 `{userId}:{postId}`，天然幂等防重。
 `reactions` 额外有 `digested` 字段供共鸣聚合使用。
+索引：`userId + postId`（信息流/话题/主页装配「我的共鸣与收藏标记」）；
+bookmarks 另有 `userId + createdAt`（收藏分页）。
 
 **`hg_assets`**
 
@@ -119,7 +121,7 @@ idx_feed: clubId + status + visibility + createdAt(-1)
 ### 话题与文集
 
 **`hg_topics`**：`status` 为 `pending` / `active` / `archived`，`postCount` 参与计数。
-**`hg_topic_follows`**：`_id` 为 `{userId}:{topicId}`。
+**`hg_topic_follows`**：`_id` 为 `{userId}:{topicId}`。索引：`userId`（我的话题与列表装配）。
 **`hg_collections`**：`visibility`、`order`、`entryCount`、`intro`。
 **`hg_collection_entries`**：`collectionId`、`postId`、`consentId`、`order`。
 **不存正文快照** —— 目录每次实时读取原文状态，避免绕过权限。
@@ -140,6 +142,7 @@ idx_feed: clubId + status + visibility + createdAt(-1)
 
 **`hg_notifications`**：`recipientId`、`eventType`、`title`、`summary`、
 `targetType`、`targetId`、`readAt`。文案中性，不含正文与匿名映射。
+索引：`recipientId + createdAt`（消息列表分页与未读数轮询）。
 
 **`hg_reports`**（受限）：`reporterId` 仅存于此，**任何响应都不返回**（含管理台）。
 
