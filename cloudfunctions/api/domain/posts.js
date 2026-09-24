@@ -101,7 +101,12 @@ async function loadMyFlags(collection, userId, postIds) {
   const _ = db.command();
   const res = await db
     .coll(collection)
-    .where({ userId, postId: _.in(postIds) })
+    .where({
+      userId,
+      postId: _.in(postIds),
+      // 评论共鸣与原帖共鸣共表；收藏查询不附加共鸣类型条件。
+      ...(collection === COLLECTIONS.reactions ? { commentId: _.exists(false) } : {}),
+    })
     .limit(postIds.length)
     .get()
     .catch(() => ({ data: [] }));
@@ -419,31 +424,21 @@ async function deletePost(payload, ctx) {
 async function toggleReaction(payload, ctx) {
   const id = validators.requireId(payload.id, 'id');
   const next = payload.next === true;
-
-  const docId = `${ctx.viewer.userId}:${id}`;
-  const [post, existing] = await Promise.all([
-    db.findOneById(COLLECTIONS.posts, id),
-    db.findOneById(COLLECTIONS.reactions, docId),
-  ]);
+  const post = await db.findOneById(COLLECTIONS.posts, id);
   if (!policies.canInteract(ctx.viewer, post)) throw errors.notAccessible({ postId: id });
+  return persistReaction(ctx.viewer.userId, id, null, next);
+}
 
-  if (next && !existing) {
-    // 并发双击撞唯一 _id 时按"已共鸣"处理，不重复计数
-    const added = await db.coll(COLLECTIONS.reactions)
-      .add({
-        data: { _id: docId, userId: ctx.viewer.userId, postId: id, type: 'resonance', createdAt: db.serverDate() },
-      })
-      .catch((err) => {
-        if (!/23505|duplicate key/i.test(`${err.code || ''} ${err.message || ''}`)) throw err;
-        return null;
-      });
-    if (added !== null) await db.incCounter(COLLECTIONS.posts, id, 'reactionCount', 1);
-  } else if (!next && existing) {
-    await db.coll(COLLECTIONS.reactions).doc(docId).remove();
-    await db.incCounter(COLLECTIONS.posts, id, 'reactionCount', -1);
+/** 关系与计数由同一事务维护；失败不得降级为非原子写入。 */
+async function persistReaction(userId, postId, commentId, next) {
+  try {
+    return await db.getDb().rpc('hg_toggle_reaction', {
+      p_actor_id: userId, p_post_id: postId, p_comment_id: commentId, p_next: next,
+    });
+  } catch (err) {
+    if (/REACTION_TARGET_CHANGED/.test(err.message)) throw errors.notAccessible({ postId });
+    throw err;
   }
-
-  return { ok: true };
 }
 
 /** PUT/DELETE /posts/{id}/bookmark */
@@ -494,22 +489,28 @@ async function listComments(payload, ctx) {
   if (!policies.canReadPost(ctx.viewer, post)) throw errors.notAccessible({ postId: id });
 
   const _ = db.command();
-  const res = await db
-    .coll(COLLECTIONS.comments)
-    .where({
-      postId: id,
-      // 仅作者能在刷新后看到自己的待审回应；已删除的一级回应取回用于墓碑判断
-      ...(ctx.viewer.userId ? { $or: [
-        { status: _.in([POST_STATUS.PUBLISHED, POST_STATUS.DELETED]) },
-        { status: POST_STATUS.PENDING, ownerId: ctx.viewer.userId },
-      ] } : { status: _.in([POST_STATUS.PUBLISHED, POST_STATUS.DELETED]) }),
-    })
-    .orderBy('createdAt', 'asc')
-    .limit(100)
-    .get();
-
-  // 已删除的定向回复不展示；已删除的一级回应保留用于墓碑判断
-  const comments = (res.data || []).filter((c) => !c.replyToId || c.status !== POST_STATUS.DELETED);
+  // 游标只遍历实际可见的评论/回复；无回复的删除项不消耗分页额度。
+  const where = {
+    postId: id,
+    ...(ctx.viewer.userId ? { $or: [
+      { status: POST_STATUS.PUBLISHED },
+      { status: POST_STATUS.PENDING, ownerId: ctx.viewer.userId },
+    ] } : { status: POST_STATUS.PUBLISHED }),
+  };
+  const page = await db.paginate(COLLECTIONS.comments, where, {
+    cursor: validators.parseCursor(payload.cursor),
+    pageSize: validators.clampPageSize(payload.pageSize),
+    order: 'asc',
+  });
+  const pageIds = new Set(page.items.map((c) => c._id));
+  const parentIds = page.items.map((c) => c.replyToId).filter((parentId) => parentId && !pageIds.has(parentId));
+  // 回复跨页时附带父级。客户端按稳定 ID 合并，不能把父级重新当成新评论。
+  const parents = (await db.findByIds(COLLECTIONS.comments, parentIds)).filter((c) =>
+    c.postId === id && !c.replyToId && (
+      c.status === POST_STATUS.PUBLISHED || c.status === POST_STATUS.DELETED
+      || (c.status === POST_STATUS.PENDING && c.ownerId === ctx.viewer.userId)
+    ));
+  const comments = [...parents, ...page.items];
   const namedIds = comments
     .filter((c) => c.identityMode !== IDENTITY_MODE.ANONYMOUS && c.status !== POST_STATUS.DELETED)
     .map((c) => c.ownerId);
@@ -521,8 +522,8 @@ async function listComments(payload, ctx) {
     // 线程内匿名别名：同一用户在同帖内保持一致
     db
       .coll(COLLECTIONS.anonymousIdentities)
-      .where({ threadId: id })
-      .limit(100)
+      .where({ threadId: id, userId: _.in([...new Set(comments.map((c) => c.ownerId).filter(Boolean))]) })
+      .limit(Math.max(1, comments.length))
       .get()
       .catch(() => ({ data: [] })),
     loadMyCommentFlags(ctx.viewer.userId, publishedIds),
@@ -564,7 +565,11 @@ async function listComments(payload, ctx) {
     );
 
   if (process.env.NODE_ENV !== 'production') anonymity.assertNoIdentityLeak(items, 'comments');
-  return { items, nextCursor: null };
+  return {
+    items,
+    nextCursor: page.hasMore && page.items.length > 0
+      ? validators.buildCursor(page.items[page.items.length - 1]) : null,
+  };
 }
 
 /** POST /posts/{id}/comments —— 提交后 pending，审核通过才展示 */
@@ -605,7 +610,16 @@ async function createComment(payload, ctx) {
     });
     await require('./foreground-review').runOwnedReview('comment', created.id, ctx).catch(() => null);
     const current = await db.findOneById(COLLECTIONS.comments, created.id);
-    return { ...created, state: current?.status || 'pending' };
+    if (!current) throw errors.conflict('回应状态暂时无法确认，请重试');
+    // 返回审核后的当前版本与白名单 DTO；客户端不得拿临时 ID 假装删除成功。
+    const dto = presenters.presentComment(current, {
+      viewer: ctx.viewer,
+      authorUser: ctx.user,
+      alias: alias && alias.alias,
+      isAuthor: current.ownerId === post.ownerId,
+      now: ctx.now,
+    });
+    return { ...created, state: current.status, version: dto.version, comment: dto };
   } catch (err) {
     if (/IDEMPOTENCY_|COMMENT_TARGET_CHANGED/.test(err.message)) throw errors.conflict('内容或请求状态已变化，请刷新后重试');
     throw err;
@@ -617,35 +631,14 @@ async function toggleCommentReaction(payload, ctx) {
   const commentId = validators.requireId(payload.commentId, 'commentId');
   const next = payload.next === true;
 
-  const docId = ctx.viewer.userId + ':comment:' + commentId;
-  const [comment, existing] = await Promise.all([
-    db.findOneById(COLLECTIONS.comments, commentId),
-    db.findOneById(COLLECTIONS.reactions, docId),
-  ]);
+  const comment = await db.findOneById(COLLECTIONS.comments, commentId);
   // 待审/已删除的回应不可共鸣；无权与不存在返回同一形态
   if (!comment || comment.status !== POST_STATUS.PUBLISHED) throw errors.notAccessible({ commentId });
   if (payload.id && comment.postId !== payload.id) throw errors.invalidInput('回应不属于这条内容', { field: 'commentId' });
   const post = await db.findOneById(COLLECTIONS.posts, comment.postId);
   if (!policies.canInteract(ctx.viewer, post)) throw errors.notAccessible({ postId: comment.postId });
 
-  if (next && !existing) {
-    // 并发双击撞唯一 _id 时按"已共鸣"处理，不重复计数
-    const added = await db.coll(COLLECTIONS.reactions)
-      .add({
-        // postId 便于随原帖一并回收；worker 共鸣聚合只统计无 commentId 的记录
-        data: { _id: docId, userId: ctx.viewer.userId, postId: comment.postId, commentId, type: 'resonance', createdAt: db.serverDate() },
-      })
-      .catch((err) => {
-        if (!/23505|duplicate key/i.test(`${err.code || ''} ${err.message || ''}`)) throw err;
-        return null;
-      });
-    if (added !== null) await db.incCounter(COLLECTIONS.comments, commentId, 'reactionCount', 1);
-  } else if (!next && existing) {
-    await db.coll(COLLECTIONS.reactions).doc(docId).remove();
-    await db.incCounter(COLLECTIONS.comments, commentId, 'reactionCount', -1);
-  }
-
-  return { ok: true };
+  return persistReaction(ctx.viewer.userId, comment.postId, commentId, next);
 }
 
 /** DELETE /posts/{id}/comments/{commentId} —— 评论者删除自己的回应 */
