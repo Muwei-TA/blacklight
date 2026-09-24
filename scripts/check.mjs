@@ -3,12 +3,13 @@
  *
  *   node scripts/check.mjs
  *
- * 检查五项：
+ * 检查六项：
  *   1. JS/MJS 语法、JSON 语法与 BOM
  *   2. 架构纪律：domain 层不得内联权限判断、shared/policies 不得引入 SDK
  *   3. DTO 安全：presenters 必须白名单构造，不得 spread 整个文档
  *   4. api 路由：每个 action 都有实现，domain 导出无孤儿
  *   5. 云函数完整性：index.js / package.json 齐备，shared 引用路径正确
+ *   6. 跨仓库契约：前端 transport 引用的 action 必须存在于 api 路由表（可选，../前端 缺失时跳过）
  */
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, extname, relative, dirname, resolve, sep } from 'node:path';
@@ -203,6 +204,33 @@ for (const fn of fns) {
   }
 }
 console.log(`      functions: ${fns.join(', ')}`);
+
+// ---------- 6. 跨仓库契约一致性（可选） ----------
+console.log('[6/6] 前后端契约一致性');
+const feTransport = join(ROOT, '..', '前端', 'api', 'transport.js');
+if (!existsSync(feTransport)) {
+  console.log('      跳过：未找到 ../前端/api/transport.js（独立运行本仓库时正常）');
+} else {
+  // transport 里的 action 字面量均为小写多段路径（pattern 以 / 开头故不会误匹配）
+  const feSrc = readFileSync(feTransport, 'utf8');
+  const feActions = new Set();
+  const feActionRe = /'([a-z][a-z0-9-]*(?:\/[a-z0-9-]+)+)'/g;
+  let feMatch;
+  while ((feMatch = feActionRe.exec(feSrc))) feActions.add(feMatch[1]);
+
+  const beSrc = readFileSync(apiIndex, 'utf8');
+  const beActions = new Set();
+  const beActionRe = /'([a-z][a-z0-9/_-]*)':\s*\w+\.\w+/g;
+  let beMatch;
+  while ((beMatch = beActionRe.exec(beSrc))) beActions.add(beMatch[1]);
+
+  const drift = [...feActions].filter((a) => !beActions.has(a));
+  if (drift.length > 0) {
+    fail(`前端 transport 引用了后端不存在的 action：${drift.join(', ')}（契约三方同步缺失）`);
+  }
+  const unusedByFe = [...beActions].filter((a) => !feActions.has(a));
+  console.log(`      fe 引用: ${feActions.size}, be 实现: ${beActions.size}, 漂移: ${drift.length}, 前端未引用: ${unusedByFe.length}`);
+}
 
 console.log('');
 console.log(problems === 0 ? 'OK: 全部检查通过' : `FAILED: ${problems} 个问题`);

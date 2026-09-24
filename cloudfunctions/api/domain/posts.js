@@ -215,10 +215,15 @@ async function createPost(payload, ctx) {
   const idempotencyKey = validators.requireString(payload.idempotencyKey, '请求标识', { max: 120 });
   if (input.assetIds.length && !policies.canUseUploads(ctx.viewer, ctx.capabilities)) throw errors.forbidden({ reason: 'uploads disabled' });
 
+  // 附件与话题互不依赖：并行取回后再校验，缩短发布链路的串行开销
+  const [assets, topic] = await Promise.all([
+    input.assetIds.length > 0 ? db.findByIds(COLLECTIONS.assets, input.assetIds) : Promise.resolve([]),
+    input.topicId ? db.findOneById(COLLECTIONS.topics, input.topicId) : Promise.resolve(null),
+  ]);
+
   // 校验附件归属与状态：只能绑定本人已验证的附件
   let hasVideo = false;
   if (input.assetIds.length > 0) {
-    const assets = await db.findByIds(COLLECTIONS.assets, input.assetIds);
     if (assets.length !== input.assetIds.length) throw errors.invalidInput('附件不存在', { field: 'assetIds' });
 
     for (const asset of assets) {
@@ -237,9 +242,8 @@ async function createPost(payload, ctx) {
   }
 
   // 话题必须存在且可投稿
-  if (input.topicId) {
-    const topic = await db.findOneById(COLLECTIONS.topics, input.topicId);
-    if (!policies.canPostToTopic(ctx.viewer, topic)) throw errors.notAccessible({ topicId: input.topicId });
+  if (input.topicId && !policies.canPostToTopic(ctx.viewer, topic)) {
+    throw errors.notAccessible({ topicId: input.topicId });
   }
 
   // 仅自己内容不进审核流程，直接保存
@@ -416,17 +420,24 @@ async function toggleReaction(payload, ctx) {
   const id = validators.requireId(payload.id, 'id');
   const next = payload.next === true;
 
-  const post = await db.findOneById(COLLECTIONS.posts, id);
+  const docId = `${ctx.viewer.userId}:${id}`;
+  const [post, existing] = await Promise.all([
+    db.findOneById(COLLECTIONS.posts, id),
+    db.findOneById(COLLECTIONS.reactions, docId),
+  ]);
   if (!policies.canInteract(ctx.viewer, post)) throw errors.notAccessible({ postId: id });
 
-  const docId = `${ctx.viewer.userId}:${id}`;
-  const existing = await db.findOneById(COLLECTIONS.reactions, docId);
-
   if (next && !existing) {
-    await db.coll(COLLECTIONS.reactions).add({
-      data: { _id: docId, userId: ctx.viewer.userId, postId: id, type: 'resonance', createdAt: db.serverDate() },
-    });
-    await db.incCounter(COLLECTIONS.posts, id, 'reactionCount', 1);
+    // 并发双击撞唯一 _id 时按"已共鸣"处理，不重复计数
+    const added = await db.coll(COLLECTIONS.reactions)
+      .add({
+        data: { _id: docId, userId: ctx.viewer.userId, postId: id, type: 'resonance', createdAt: db.serverDate() },
+      })
+      .catch((err) => {
+        if (!/23505|duplicate key/i.test(`${err.code || ''} ${err.message || ''}`)) throw err;
+        return null;
+      });
+    if (added !== null) await db.incCounter(COLLECTIONS.posts, id, 'reactionCount', 1);
   } else if (!next && existing) {
     await db.coll(COLLECTIONS.reactions).doc(docId).remove();
     await db.incCounter(COLLECTIONS.posts, id, 'reactionCount', -1);
@@ -440,16 +451,22 @@ async function toggleBookmark(payload, ctx) {
   const id = validators.requireId(payload.id, 'id');
   const next = payload.next === true;
 
-  const post = await db.findOneById(COLLECTIONS.posts, id);
+  const docId = `${ctx.viewer.userId}:${id}`;
+  const [post, existing] = await Promise.all([
+    db.findOneById(COLLECTIONS.posts, id),
+    db.findOneById(COLLECTIONS.bookmarks, docId),
+  ]);
   if (!policies.canInteract(ctx.viewer, post)) throw errors.notAccessible({ postId: id });
 
-  const docId = `${ctx.viewer.userId}:${id}`;
-  const existing = await db.findOneById(COLLECTIONS.bookmarks, docId);
-
   if (next && !existing) {
-    await db.coll(COLLECTIONS.bookmarks).add({
-      data: { _id: docId, userId: ctx.viewer.userId, postId: id, createdAt: db.serverDate() },
-    });
+    await db.coll(COLLECTIONS.bookmarks)
+      .add({
+        data: { _id: docId, userId: ctx.viewer.userId, postId: id, createdAt: db.serverDate() },
+      })
+      .catch((err) => {
+        // 并发双击撞唯一 _id：视为已收藏，幂等成功
+        if (!/23505|duplicate key/i.test(`${err.code || ''} ${err.message || ''}`)) throw err;
+      });
   } else if (!next && existing) {
     await db.coll(COLLECTIONS.bookmarks).doc(docId).remove();
   }
@@ -496,20 +513,22 @@ async function listComments(payload, ctx) {
   const namedIds = comments
     .filter((c) => c.identityMode !== IDENTITY_MODE.ANONYMOUS && c.status !== POST_STATUS.DELETED)
     .map((c) => c.ownerId);
-  const users = await db.findByIds(COLLECTIONS.users, namedIds);
-  const userById = new Map(users.map((u) => [u._id, u]));
-
-  // 线程内匿名别名：同一用户在同帖内保持一致
-  const aliasRes = await db
-    .coll(COLLECTIONS.anonymousIdentities)
-    .where({ threadId: id })
-    .limit(100)
-    .get()
-    .catch(() => ({ data: [] }));
-  const aliasByUser = new Map((aliasRes.data || []).map((d) => [d.userId, d.alias]));
-
   const publishedIds = comments.filter((c) => c.status === POST_STATUS.PUBLISHED).map((c) => c._id);
-  const myCommentReactions = await loadMyCommentFlags(ctx.viewer.userId, publishedIds);
+
+  // 用户 / 匿名别名 / 我的共鸣标记互不依赖，并行取回
+  const [users, aliasRes, myCommentReactions] = await Promise.all([
+    db.findByIds(COLLECTIONS.users, namedIds),
+    // 线程内匿名别名：同一用户在同帖内保持一致
+    db
+      .coll(COLLECTIONS.anonymousIdentities)
+      .where({ threadId: id })
+      .limit(100)
+      .get()
+      .catch(() => ({ data: [] })),
+    loadMyCommentFlags(ctx.viewer.userId, publishedIds),
+  ]);
+  const userById = new Map(users.map((u) => [u._id, u]));
+  const aliasByUser = new Map((aliasRes.data || []).map((d) => [d.userId, d.alias]));
 
   const topLevel = comments.filter((c) => !c.replyToId);
   const repliesByParent = new Map();
@@ -598,22 +617,29 @@ async function toggleCommentReaction(payload, ctx) {
   const commentId = validators.requireId(payload.commentId, 'commentId');
   const next = payload.next === true;
 
-  const comment = await db.findOneById(COLLECTIONS.comments, commentId);
+  const docId = ctx.viewer.userId + ':comment:' + commentId;
+  const [comment, existing] = await Promise.all([
+    db.findOneById(COLLECTIONS.comments, commentId),
+    db.findOneById(COLLECTIONS.reactions, docId),
+  ]);
   // 待审/已删除的回应不可共鸣；无权与不存在返回同一形态
   if (!comment || comment.status !== POST_STATUS.PUBLISHED) throw errors.notAccessible({ commentId });
   if (payload.id && comment.postId !== payload.id) throw errors.invalidInput('回应不属于这条内容', { field: 'commentId' });
   const post = await db.findOneById(COLLECTIONS.posts, comment.postId);
   if (!policies.canInteract(ctx.viewer, post)) throw errors.notAccessible({ postId: comment.postId });
 
-  const docId = ctx.viewer.userId + ':comment:' + commentId;
-  const existing = await db.findOneById(COLLECTIONS.reactions, docId);
-
   if (next && !existing) {
-    await db.coll(COLLECTIONS.reactions).add({
-      // postId 便于随原帖一并回收；worker 共鸣聚合只统计无 commentId 的记录
-      data: { _id: docId, userId: ctx.viewer.userId, postId: comment.postId, commentId, type: 'resonance', createdAt: db.serverDate() },
-    });
-    await db.incCounter(COLLECTIONS.comments, commentId, 'reactionCount', 1);
+    // 并发双击撞唯一 _id 时按"已共鸣"处理，不重复计数
+    const added = await db.coll(COLLECTIONS.reactions)
+      .add({
+        // postId 便于随原帖一并回收；worker 共鸣聚合只统计无 commentId 的记录
+        data: { _id: docId, userId: ctx.viewer.userId, postId: comment.postId, commentId, type: 'resonance', createdAt: db.serverDate() },
+      })
+      .catch((err) => {
+        if (!/23505|duplicate key/i.test(`${err.code || ''} ${err.message || ''}`)) throw err;
+        return null;
+      });
+    if (added !== null) await db.incCounter(COLLECTIONS.comments, commentId, 'reactionCount', 1);
   } else if (!next && existing) {
     await db.coll(COLLECTIONS.reactions).doc(docId).remove();
     await db.incCounter(COLLECTIONS.comments, commentId, 'reactionCount', -1);

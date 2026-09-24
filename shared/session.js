@@ -76,14 +76,13 @@ async function loadClubConfig(clubId = DEFAULT_CLUB_ID) {
  * @returns {{ viewer, user, membership, club, capabilities }}
  */
 async function resolveContext(openid, clubId = DEFAULT_CLUB_ID) {
-  const club = await loadClubConfig(clubId);
+  // 社团配置与用户解析互不依赖：并行取回，缩短每个请求的固定串行开销
+  const [club, user] = await Promise.all([
+    loadClubConfig(clubId),
+    openid ? resolveUser(openid) : null,
+  ]);
   const capabilities = club.capabilities;
 
-  if (!openid) {
-    return { viewer: GUEST_VIEWER, user: null, membership: null, club, capabilities };
-  }
-
-  const user = await resolveUser(openid);
   if (!user || user.status !== 'active') {
     return { viewer: GUEST_VIEWER, user: null, membership: null, club, capabilities };
   }

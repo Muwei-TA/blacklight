@@ -47,7 +47,7 @@
 | `me/profile/update` | `{ displayName?, avatarAssetId? }` | `{ id, displayName, avatar }` | 已登录 |
 | `me/exports` | — | `{ state: 'queued' }` | 成员 + `capabilities.export` |
 | `me/account/delete` | `{ confirm: '注销' }` | `{ state: 'pending' }` | 已登录 |
-| `profile/get` | `{ targetUserId, cursor? }` | `{ user, memberStatusText, visibleCount, items }` | 任意 |
+| `profile/get` | `{ targetUserId, cursor? }` | `{ user, memberStatusText, visibleCount, items, nextCursor }` | 任意 |
 
 > `profile/get` 用 `targetUserId` 而非 `userId`，明确它是"被查看者"。
 > 调用者身份只能来自 `ctx.viewer`，不接受 payload 传入。
@@ -164,9 +164,9 @@
 
 | action | payload | 返回 |
 |---|---|---|
-| `search/query` | `{ q, scope: 'post'\|'topic', pageSize? }` | `{ items, nextCursor }` |
+| `search/query` | `{ q, scope: 'post'\|'topic', cursor?, pageSize? }` | `{ items, nextCursor }` |
 | `search/suggestions` | — | `{ items: string[] }` |
-| `search/private` | `{ q }` | `{ items }` |
+| `search/private` | `{ q, cursor?, pageSize? }` | `{ items, nextCursor }` |
 
 **搜索约束**（`domain/search.js`）：
 - 权限条件先进 `where`，不是查出来再过滤

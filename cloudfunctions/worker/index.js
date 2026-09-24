@@ -10,7 +10,7 @@
  * 3. 所有任务共享 shared/policies 的权限规则，不各自复制一份判断。
  */
 
-const { COLLECTIONS, REVIEW_TASK_STATUS } = require('./shared/constants');
+const { COLLECTIONS, REVIEW_TASK_STATUS, DEFAULT_CLUB_ID } = require('./shared/constants');
 const db = require('./shared/db');
 const { scrubForLog } = require('./shared/anonymity');
 
@@ -351,7 +351,7 @@ exports.main = async (event = {}, context = {}) => {
     }
   }
 
-  await db.coll(COLLECTIONS.clubConfig).doc('heiguang').update({ data: { workerLastRunAt: db.serverDate(), workerSummary: summary } });
+  await db.coll(COLLECTIONS.clubConfig).doc(DEFAULT_CLUB_ID).update({ data: { workerLastRunAt: db.serverDate(), workerSummary: summary } });
   console.log('[worker] summary', summary);
   return { code: 0, data: summary };
 };

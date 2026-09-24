@@ -127,17 +127,6 @@ async function myProfile(payload, ctx) {
  */
 async function publicProfile(payload, ctx) {
   const targetUserId = validators.requireId(payload.targetUserId, 'targetUserId');
-  const user = await db.findOneById(COLLECTIONS.users, targetUserId);
-  if (!user) throw errors.notAccessible({ targetUserId });
-
-  const membership = await db
-    .coll(COLLECTIONS.memberships)
-    .where({ userId: targetUserId, clubId: DEFAULT_CLUB_ID })
-    .limit(1)
-    .get()
-    .catch(() => ({ data: [] }));
-  const isActive = membership.data && membership.data[0] && membership.data[0].status === MEMBER_STATUS.ACTIVE;
-
   const posts = require('./posts');
   const where = posts.buildFeedWhere(ctx.viewer, {
     ownerId: targetUserId,
@@ -145,11 +134,24 @@ async function publicProfile(payload, ctx) {
     identityMode: 'named',
   });
 
-  const { items } = await db.paginate(COLLECTIONS.posts, where, {
-    cursor: validators.parseCursor(payload.cursor),
-    pageSize: validators.clampPageSize(payload.pageSize),
-  });
-  const cards = await posts.hydrateCards(items, ctx);
+  // 用户 / 成员资格 / 作品列表互不依赖，并行取回
+  const [user, membershipRes, page] = await Promise.all([
+    db.findOneById(COLLECTIONS.users, targetUserId),
+    db
+      .coll(COLLECTIONS.memberships)
+      .where({ userId: targetUserId, clubId: DEFAULT_CLUB_ID })
+      .limit(1)
+      .get()
+      .catch(() => ({ data: [] })),
+    db.paginate(COLLECTIONS.posts, where, {
+      cursor: validators.parseCursor(payload.cursor),
+      pageSize: validators.clampPageSize(payload.pageSize),
+    }),
+  ]);
+  if (!user) throw errors.notAccessible({ targetUserId });
+  const isActive = membershipRes.data && membershipRes.data[0] && membershipRes.data[0].status === MEMBER_STATUS.ACTIVE;
+
+  const cards = await posts.hydrateCards(page.items, ctx);
 
   return {
     user: presenters.presentUser(user),
@@ -157,7 +159,9 @@ async function publicProfile(payload, ctx) {
     // 计数按当前访问者可见集合计算，不暴露社内发帖总量
     visibleCount: cards.length,
     items: cards,
-    nextCursor: null,
+    nextCursor: page.hasMore && page.items.length > 0
+      ? validators.buildCursor(page.items[page.items.length - 1])
+      : null,
   };
 }
 
