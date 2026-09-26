@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { once } from 'node:events';
 import { REPOSITORY_ROOT, readMigrationSet, sha256 } from './local-migration-lib.mjs';
 
@@ -322,7 +322,6 @@ async function importMedia(compose, snapshot) {
 }
 
 async function importRows(compose, snapshot) {
-  const seed = snapshot.manifest.tables.find((table) => table.name === 'hg_club_config');
   const replaceSeed = has('--replace-local-club-seed');
   const initialSeed = replaceSeed ? `DELETE FROM public.hg_club_config WHERE id = 'heiguang';\n` : '';
   const child = spawn('docker', [

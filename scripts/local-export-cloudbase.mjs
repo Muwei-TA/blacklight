@@ -2,9 +2,6 @@ import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, open, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { once } from 'node:events';
-import { Readable } from 'node:stream';
-import { fileURLToPath } from 'node:url';
 import {
   REPOSITORY_ROOT,
   readMigrationSet,
@@ -220,7 +217,7 @@ async function listPrivateImageObjectKeys(bucket) {
     visitedFolders.add(prefix);
     let cursor;
     const childFolders = new Set();
-    do {
+    for (;;) {
       let result;
       try {
         result = await bucket.list(prefix, {
@@ -252,7 +249,7 @@ async function listPrivateImageObjectKeys(bucket) {
         throw Object.assign(new Error('media listing cursor did not advance'), { code: 'MEDIA_LIST_CURSOR_INVALID' });
       }
       cursor = page.nextCursor;
-    } while (true);
+    }
 
     for (const child of childFolders) await listFolder(child);
   }
@@ -313,7 +310,8 @@ async function main() {
       const result = await exportTable(db, table, outDir);
       objectIds.push(...result.objectIds);
       totalRows += result.rows;
-      const { objectIds: _ignored, ...summary } = result;
+      const summary = { ...result };
+      delete summary.objectIds;
       manifest.tables.push(summary);
     }
     manifest.totalRows = totalRows;
