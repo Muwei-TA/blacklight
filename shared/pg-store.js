@@ -1,52 +1,128 @@
-/** PostgreSQL repository compatibility boundary; no NoSQL SDK calls.
- * Domain predicates are encoded as data and executed by restricted PostgreSQL RPCs.
- * RPC/table privileges are service_role only. Never expose this module as an API action.
- */
+'use strict';
+
+/** Direct PostgreSQL adapter for the existing hg_* JSONB tables and RPCs. */
+
 const { randomUUID } = require('node:crypto');
+const { Pool } = require('pg');
 const { COLLECTIONS } = require('./constants');
+
+const RPC_NAMES = new Set([
+  'hg_store',
+  'hg_create_post',
+  'hg_resubmit_rejected_post',
+  'hg_toggle_reaction',
+  'hg_create_comment',
+  'hg_image_intent',
+  'hg_claim_image',
+  'hg_confirm_image',
+  'hg_apply_membership',
+  'hg_request_account_deletion',
+  'hg_finish_account_deletion',
+  'hg_moderate',
+  'hg_comment_queue',
+  'hg_usage_status',
+  'hg_governance',
+  'hg_governance_admin',
+  'hg_create_invite',
+  'hg_usage_reserve_review_call',
+  'hg_finish_review',
+]);
+
 const allowed = new Set(Object.values(COLLECTIONS));
-let client;
-function getClient() {
-  if (!client) {
-    if (!process.env.CLOUDBASE_APIKEY) throw new Error('Server database credential unavailable');
-    const cloudbase = require('@cloudbase/js-sdk');
-    client = cloudbase.init({ env: process.env.TCB_ENV || process.env.SCF_NAMESPACE, region: 'ap-shanghai', accessKey: process.env.CLOUDBASE_APIKEY }).rdb();
+let pool;
+
+function getPool() {
+  if (!pool) {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) throw new Error('DATABASE_URL is required');
+    const max = Number(process.env.PG_POOL_MAX || 10);
+    pool = new Pool({
+      connectionString,
+      max: Number.isInteger(max) && max > 0 ? Math.min(max, 50) : 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+      application_name: process.env.PG_APPLICATION_NAME || 'blacklight-nas-backend',
+    });
+    pool.on('error', (error) => {
+      console.error('[pg] idle client error', { code: error.code || 'unknown' });
+    });
   }
-  return client;
+  return pool;
 }
-async function rpc(name, args) {
-  const { data, error } = await getClient().rpc(name, args);
-  if (error) {
-    const err = new Error(error.message || 'PostgreSQL operation failed');
-    err.code = error.code;
-    throw err;
+
+async function rpc(name, args = {}) {
+  if (typeof name !== 'string' || !RPC_NAMES.has(name)) throw new Error('Unsupported database operation');
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Invalid database operation arguments');
+  const entries = Object.entries(args).filter(([, value]) => value !== undefined);
+  for (const [key] of entries) {
+    if (!/^p_[a-z0-9_]+$/.test(key)) throw new Error('Invalid database operation argument');
   }
-  return data;
+  const call = entries.map(([key], index) => `${key} => $${index + 1}`).join(', ');
+  const values = entries.map(([, value]) => (
+    value && typeof value === 'object' ? JSON.stringify(value) : value
+  ));
+  const result = await getPool().query(`SELECT public.${name}(${call}) AS value`, values);
+  return result.rows[0] ? result.rows[0].value : null;
 }
 
 const op = (kind, value) => ({ $op: kind, value });
-const command = Object.fromEntries(['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in', 'nin', 'exists', 'inc'].map((k) => [k, (value) => op(k, value)]));
+const command = Object.fromEntries(
+  ['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in', 'nin', 'exists', 'inc'].map((kind) => [kind, (value) => op(kind, value)]),
+);
 command.and = (value) => ({ $and: value });
 command.or = (value) => ({ $or: value });
 const serverDate = () => new Date().toISOString();
+
 class Query {
   constructor(name, query = {}, order = [], limit = 100, single = false) {
     if (!allowed.has(name)) throw new Error('Unknown repository');
     Object.assign(this, { name, query, order, take: limit, single });
   }
+
   where(query) { return new Query(this.name, query, this.order, this.take); }
   doc(id) { return new Query(this.name, { _id: id }, this.order, 1, true); }
   orderBy(field, direction) { return new Query(this.name, this.query, [...this.order, [field, direction]], this.take, this.single); }
   limit(limit) { return new Query(this.name, this.query, this.order, limit, this.single); }
+
   async execute(kind, data = {}) {
-    return rpc('hg_store', { p_table: this.name, p_op: kind, p_query: this.query, p_data: data, p_order: this.order, p_limit: this.take });
+    return rpc('hg_store', {
+      p_table: this.name,
+      p_op: kind,
+      p_query: this.query,
+      p_data: data,
+      p_order: this.order,
+      p_limit: this.take,
+    });
   }
-  async get() { const result = await this.execute('get'); return this.single ? { data: result.data[0] || null } : result; }
+
+  async get() {
+    const result = await this.execute('get');
+    return this.single ? { data: result.data[0] || null } : result;
+  }
+
   count() { return this.execute('count'); }
   add({ data }) { return this.execute('add', { ...data, _id: data._id || randomUUID() }); }
   update({ data }) { return this.execute('update', data); }
   remove() { return this.execute('remove'); }
 }
+
 function collection(name) { return new Query(name); }
 function RegExpFilter({ regexp, options }) { return { $op: 'regex', value: regexp, options }; }
-module.exports = { collection, command, serverDate, RegExp: RegExpFilter, rpc };
+
+async function query(text, values = []) {
+  return getPool().query(text, values);
+}
+
+async function ping() {
+  await getPool().query('SELECT 1');
+  return true;
+}
+
+async function close() {
+  if (!pool) return;
+  const active = pool;
+  pool = null;
+  await active.end();
+}
+
+module.exports = { collection, command, serverDate, RegExp: RegExpFilter, rpc, query, ping, close };

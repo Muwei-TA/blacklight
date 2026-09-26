@@ -147,9 +147,25 @@ async function canReadAsset(asset, ctx) {
   return policies.canReadPost(ctx.viewer, post);
 }
 
-async function authorizedUrl(asset) {
+async function authorizedUrl(asset, ctx = null, post = null) {
   if (asset.status !== ASSET_STATUS.VERIFIED || !asset.fileId) return '';
   const cloud = db.getStorage();
+  if (typeof cloud.createAssetUrl === 'function') {
+    if (!ctx || !ctx.viewer) return '';
+    const permissionVersion = post
+      ? (post.permissionVersion === undefined ? 0 : post.permissionVersion)
+      : (asset.permissionVersion === undefined ? 0 : asset.permissionVersion);
+    try {
+      return cloud.createAssetUrl({
+        assetId: asset._id,
+        fileId: asset.fileId,
+        userId: ctx.viewer.userId || null,
+        permissionVersion,
+      });
+    } catch (_) {
+      return '';
+    }
+  }
   const result = await cloud.getTempFileURL({ fileList: [asset.fileId] }).catch(() => null);
   const file = result && result.fileList && result.fileList[0];
   return file && Number(file.status) === 0 ? file.tempFileURL || '' : '';
@@ -160,12 +176,13 @@ async function getStatus(payload, ctx) {
   const assetId = validators.requireId(payload.assetId, 'assetId');
   const asset = await db.findOneById(COLLECTIONS.assets, assetId);
   if (!asset || !(await canReadAsset(asset, ctx))) throw errors.notAccessible({ assetId });
+  const post = asset.postId ? await db.findOneById(COLLECTIONS.posts, asset.postId) : null;
 
   return {
     assetId,
     status: asset.status,
     mediaType: asset.mediaType,
-    url: await authorizedUrl(asset),
+    url: await authorizedUrl(asset, ctx, post),
     cover: '',
     failureReason: asset.status === ASSET_STATUS.REJECTED ? asset.failureReason || '未通过内容检查' : '',
     width: asset.width || 0,
@@ -177,7 +194,7 @@ async function signReadableAssets(assets, posts, ctx) {
   const allowed = new Map(posts.filter((p) => policies.canReadPost(ctx.viewer, p)).map((p) => [p._id, p]));
   return Promise.all(assets.map(async (asset) => ({
     ...asset, tempFileURL: allowed.has(asset.postId) && (allowed.get(asset.postId).assetIds || []).includes(asset._id)
-      ? await authorizedUrl(asset) : '', coverURL: '',
+      ? await authorizedUrl(asset, ctx, allowed.get(asset.postId)) : '', coverURL: '',
   })));
 }
 

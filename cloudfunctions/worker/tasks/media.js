@@ -11,7 +11,6 @@
  * - 视频：能力关闭。历史视频任务也不会进入检查或展示链路。
  */
 
-const cloud = require('wx-server-sdk');
 const {
   COLLECTIONS,
   ASSET_STATUS,
@@ -21,6 +20,7 @@ const {
 } = require('../shared/constants');
 const db = require('../shared/db');
 const usage = require('../shared/usage');
+const wechat = require('../shared/wechat-api');
 const {
   ImageProcessingError,
   JPEG_MIME,
@@ -75,7 +75,7 @@ async function verifyFileMetadata(asset) {
 async function checkImage(buffer, clubId = DEFAULT_CLUB_ID) {
   await usage.reserveReviewCall('image', clubId);
   try {
-    await cloud.openapi({ appid: process.env.MINIPROGRAM_APP_ID }).security.imgSecCheck({
+    await wechat.imgSecCheck({
       media: { contentType: JPEG_MIME, value: buffer },
     });
     return { pass: true };

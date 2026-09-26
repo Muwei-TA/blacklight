@@ -31,13 +31,17 @@ function loadVm(relativePath, mocks) {
   const filename = resolve(BACKEND, relativePath);
   const source = readFileSync(filename, 'utf8');
   const localRequire = (request) => {
-    if (request.endsWith('/shared/db')) return { ...mocks['../shared/db'], getStorage: mocks['../shared/db']?.getCloud || (() => mocks['wx-server-sdk']) };
+    if (request.endsWith('/shared/db')) return {
+      ...mocks['../shared/db'],
+      getStorage: mocks['../shared/db']?.getStorage || mocks['../shared/db']?.getCloud || (() => mocks['wx-server-sdk']),
+    };
     if (Object.prototype.hasOwnProperty.call(mocks, request)) return mocks[request];
     if (request.endsWith('/shared/constants')) return mocks['../shared/constants'];
     if (request.endsWith('/shared/policies')) return mocks['../shared/policies'];
     if (request.endsWith('/shared/validators')) return mocks['../shared/validators'];
     if (request.endsWith('/shared/errors')) return mocks['../shared/errors'];
     if (request.endsWith('/shared/image-processing')) return mocks['../shared/image-processing'];
+    if (request.endsWith('/shared/wechat-api')) return mocks['../shared/wechat-api'];
     return createRequire(filename)(request);
   };
   const module = { exports: {} };
@@ -300,13 +304,12 @@ test('media verification update is guarded by the observed status and fileId', a
   let denyQuota = false;
   let imageCheckCalls = 0;
   const asset = { _id: 'asset-media', mediaType: 'image', status: 'uploaded', fileId: 'file-v1' };
-  const cloud = {
+  const storage = {
     async getTempFileURL() { return { fileList: [{ status: 0, tempFileURL: 'unused' }] }; },
     async downloadFile() { return { fileContent: Buffer.from('jpeg') }; },
-    openapi: () => ({ security: { async imgSecCheck() { imageCheckCalls += 1; } } }),
   };
   const db = {
-    getCloud: () => cloud,
+    getStorage: () => storage,
     async findOneById() { return asset; },
     serverDate: () => 'now',
     coll() {
@@ -323,7 +326,6 @@ test('media verification update is guarded by the observed status and fileId', a
     },
   };
   const media = loadVm('cloudfunctions/worker/tasks/media.js', {
-    'wx-server-sdk': cloud,
     '../shared/constants': constants,
     '../shared/db': db,
     '../shared/usage': {
@@ -337,6 +339,7 @@ test('media verification update is guarded by the observed status and fileId', a
         } : null;
       },
     },
+    '../shared/wechat-api': { async imgSecCheck() { imageCheckCalls += 1; } },
     '../shared/image-processing': {
       ImageProcessingError,
       JPEG_MIME: 'image/jpeg',

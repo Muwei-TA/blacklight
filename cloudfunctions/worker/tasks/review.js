@@ -8,7 +8,6 @@
  * 相关能力是否开通属 G0 核验事项，未开通时 fail-closed 转人工。
  */
 
-const cloud = require('wx-server-sdk');
 const {
   COLLECTIONS,
   POST_STATUS,
@@ -18,6 +17,7 @@ const {
 } = require('../shared/constants');
 const db = require('../shared/db');
 const usage = require('../shared/usage');
+const wechat = require('../shared/wechat-api');
 
 /**
  * 文本安全检查。
@@ -33,10 +33,10 @@ async function checkText(content, openid, clubId = DEFAULT_CLUB_ID) {
     let res;
     await usage.reserveReviewCall('text', clubId);
     try {
-      res = await cloud.openapi({ appid: process.env.MINIPROGRAM_APP_ID }).security.msgSecCheck({ version: 2, openid, scene: 2, content: chunk });
+      res = await wechat.msgSecCheck({ version: 2, openid, scene: 2, content: chunk });
     } catch (err) {
       // Upstream messages may echo content or credentials; retain only the code.
-      throw new Error(`msgSecCheck failed: ${err.errCode || 'unavailable'}`);
+      throw new Error(`msgSecCheck failed: ${err.errCode || err.code || 'unavailable'}`);
     }
     const { label, suggest } = res.result || {};
     if (suggest === 'review') return { pass: false, suspect: true, label };

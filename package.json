@@ -2,19 +2,24 @@
   "name": "heiguang-shudong-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "黑光文学社·树洞 微信小程序后端（CloudBase 云函数 + 云数据库 + 云存储）",
+  "description": "黑光文学社·树洞本地后端（NAS Node.js API + PostgreSQL + 私有媒体存储）",
   "scripts": {
     "sync": "node scripts/sync-shared.mjs",
     "check": "node scripts/check.mjs",
+    "pretest": "npm run sync",
     "test": "node --test tests/*.test.mjs",
     "db:init": "node scripts/db-init.mjs",
     "deploy": "node scripts/deploy.mjs",
-    "lint": "npx eslint . --ext .js,.mjs"
+    "lint": "npx eslint . --ext .js,.mjs",
+    "start": "node server/index.js",
+    "worker": "node server/worker.js",
+    "dev:start": "node scripts/sync-shared.mjs && node server/index.js",
+    "dev:worker": "node scripts/sync-shared.mjs && node server/worker.js"
   },
   "keywords": [
     "wechat",
     "miniprogram",
-    "cloudbase",
+    "postgresql",
     "backend"
   ],
   "license": "MIT",
@@ -23,11 +28,14 @@
     "eslint-config-airbnb-base": "^15.0.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-import": "^2.29.1",
-    "prettier": "^3.2.5",
+    "prettier": "^3.2.5"
+  },
+  "dependencies": {
     "jpeg-js": "0.4.4",
+    "pg": "^8.23.0",
     "pngjs": "7.0.0"
   },
   "engines": {
-    "node": ">=16"
+    "node": ">=20"
   }
 }

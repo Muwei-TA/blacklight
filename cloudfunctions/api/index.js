@@ -100,5 +100,10 @@ const handlers = {
   'admin/appeal/decide': governance.decideAppeal,
 };
 
-exports.main = createRouter(handlers, { name: 'api' });
+function createHandler({ identityResolver = null } = {}) {
+  return createRouter(handlers, { name: 'api', identityResolver });
+}
+
+exports.main = createHandler();
 exports.handlers = handlers;
+exports.createHandler = createHandler;
