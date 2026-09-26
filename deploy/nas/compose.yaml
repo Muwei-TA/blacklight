@@ -1,0 +1,136 @@
+name: blacklight-nas-data
+
+services:
+  db:
+    build:
+      context: ../..
+      dockerfile: deploy/nas/Dockerfile.pg
+    image: blacklight-nas-postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-blacklight}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-blacklight_admin}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      NAS_APP_DATABASE_PASSWORD_FILE: /run/secrets/app_database_password
+    secrets:
+      - postgres_admin_password
+      - app_database_password
+    volumes:
+      - ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/pgdata:/var/lib/postgresql/data
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    stop_grace_period: 60s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/nas/Dockerfile.app
+    image: blacklight-nas-api:local
+    restart: unless-stopped
+    init: true
+    command: ["npm", "start"]
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL_FILE: /run/secrets/database_url
+      MINIPROGRAM_APP_SECRET_FILE: /run/secrets/miniprogram_app_secret
+      MEDIA_URL_SECRET_FILE: /run/secrets/media_url_secret
+      ANON_ALIAS_SECRET_FILE: /run/secrets/anon_alias_secret
+      NAS_MEDIA_DIR: /data/private-media
+    secrets:
+      - database_url
+      - source: wechat_app_secret
+        target: miniprogram_app_secret
+      - media_url_secret
+      - anon_alias_secret
+    ports:
+      - "${API_BIND_IP:-192.168.50.28}:${API_BIND_PORT:-18088}:3000"
+    volumes:
+      - ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/media:/data/private-media
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - private
+      - egress
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/v1/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    stop_grace_period: 30s
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/nas/Dockerfile.app
+    image: blacklight-nas-api:local
+    restart: unless-stopped
+    init: true
+    command: ["npm", "run", "worker"]
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL_FILE: /run/secrets/database_url
+      MINIPROGRAM_APP_SECRET_FILE: /run/secrets/miniprogram_app_secret
+      MEDIA_URL_SECRET_FILE: /run/secrets/media_url_secret
+      ANON_ALIAS_SECRET_FILE: /run/secrets/anon_alias_secret
+      NAS_MEDIA_DIR: /data/private-media
+    secrets:
+      - database_url
+      - source: wechat_app_secret
+        target: miniprogram_app_secret
+      - media_url_secret
+      - anon_alias_secret
+    volumes:
+      - ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/media:/data/private-media
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - private
+      - egress
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    stop_grace_period: 60s
+
+networks:
+  private:
+    name: blacklight-nas-private
+    internal: true
+  egress:
+    name: blacklight-nas-egress
+    # Only api/worker join this network for outbound WeChat API requests.
+    internal: false
+
+secrets:
+  postgres_admin_password:
+    file: ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/secrets/postgres_admin_password
+  app_database_password:
+    file: ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/secrets/app_database_password
+  database_url:
+    file: ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/secrets/database_url
+  wechat_app_secret:
+    file: ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/secrets/wechat_app_secret
+  media_url_secret:
+    file: ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/secrets/media_url_secret
+  anon_alias_secret:
+    file: ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/secrets/anon_alias_secret
