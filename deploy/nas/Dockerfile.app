@@ -1,7 +1,7 @@
 FROM node:22-bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gosu ca-certificates \
+    && apt-get install -y --no-install-recommends gosu ca-certificates tar \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -13,6 +13,7 @@ COPY server/ ./server/
 COPY cloudfunctions/api/ ./cloudfunctions/api/
 COPY cloudfunctions/worker/ ./cloudfunctions/worker/
 COPY scripts/sync-shared.mjs ./scripts/sync-shared.mjs
+COPY scripts/local-media-manifest.mjs scripts/local-media-receiver.mjs ./scripts/
 RUN node scripts/sync-shared.mjs \
     && mkdir -p /data/private-media \
     && chown node:node /data/private-media

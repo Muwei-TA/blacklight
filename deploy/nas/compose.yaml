@@ -112,6 +112,37 @@ services:
       - /tmp:size=128m,mode=1777
     stop_grace_period: 60s
 
+  backup:
+    image: blacklight-nas-postgres:16
+    profiles: ["maintenance"]
+    user: "0:0"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-blacklight}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-blacklight_admin}
+      NAS_POSTGRES_ADMIN_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      NAS_MEDIA_DIR: /media
+      NAS_BACKUP_DIR: /backups/blacklight-nas-data
+      NAS_RESTORE_CHECK_DIR: /restore-check
+      NAS_WRITES_QUIESCED: ${NAS_WRITES_QUIESCED:-0}
+      PGHOST: db
+      PGPORT: "5432"
+    secrets:
+      - postgres_admin_password
+    volumes:
+      - ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/media:/media:ro
+      - ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/restore-check:/restore-check
+      - ${NAS_BACKUP_ROOT:-/vol2/backups/blacklight-nas-data}:/backups/blacklight-nas-data
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - private
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    entrypoint: ["/usr/local/bin/local-backup"]
+    command: ["backup"]
+
 networks:
   private:
     name: blacklight-nas-private

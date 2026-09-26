@@ -10,3 +10,4 @@
 !deploy/nas/healthcheck-pg.sh
 !scripts/
 !scripts/local-apply-migrations.sh
+!scripts/local-backup.sh
