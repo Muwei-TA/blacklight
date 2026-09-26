@@ -148,7 +148,9 @@ function createLocalStorageAdapter({ root = mediaRoot(), bucketId = DEFAULT_BUCK
       await handle.close();
       handle = null;
       try {
-        await fsp.copyFile(temporary, target, fs.constants.COPYFILE_EXCL);
+        // The staged file is already synced. A hard link publishes it in one
+        // filesystem operation, so a crash cannot expose a partly copied JPEG.
+        await fsp.link(temporary, target);
       } catch (error) {
         if (error.code !== 'EEXIST') throw error;
         const previousStat = await fsp.lstat(target);
