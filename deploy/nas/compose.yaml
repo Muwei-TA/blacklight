@@ -20,7 +20,7 @@ services:
     networks:
       - private
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -q -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      test: ["CMD", "/usr/local/bin/healthcheck-pg"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -36,7 +36,7 @@ services:
     init: true
     command: ["npm", "start"]
     env_file:
-      - .env
+      - ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/.env
     environment:
       NODE_ENV: production
       PORT: "3000"
@@ -85,7 +85,7 @@ services:
     init: true
     command: ["npm", "run", "worker"]
     env_file:
-      - .env
+      - ${NAS_DATA_ROOT:-/vol1/docker/blacklight-nas-data}/.env
     environment:
       NODE_ENV: production
       DATABASE_URL_FILE: /run/secrets/database_url

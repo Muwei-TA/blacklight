@@ -14,7 +14,7 @@ Compose 镜像基础为 `postgres:16-bookworm` 与 `node:22-bookworm-slim`。Pos
 
 ## 秘密文件
 
-在 `secrets/` 创建以下文件，文件内容不进入仓库或命令行参数：
+在 `secrets/` 创建以下文件，文件内容不进入仓库或命令行参数。PostgreSQL 初始化脚本以容器内 UID 999 运行，`app_database_password` 必须让该 UID 可读；NAS 上该文件的当前处理方式是属组 999、模式 `0640`，其父 `secrets/` 目录维持 `0700`。
 
 | 文件 | 用途 |
 |---|---|
@@ -25,7 +25,7 @@ Compose 镜像基础为 `postgres:16-bookworm` 与 `node:22-bookworm-slim`。Pos
 | `media_url_secret` | 本地媒体短期签名密钥 |
 | `anon_alias_secret` | 现有匿名别名 HMAC 密钥，必须从已保存的原值恢复，不能重新生成替换 |
 
-`anon_alias_secret` 已由项目管理员安全恢复到 NAS 路径；本文及 Compose 不读取或展示其值。`MINIPROGRAM_APP_ID`、API 绑定地址和公网 API URL 配在 `deploy/nas/.env`，可从 `.env.example` 复制。不要在 `docker compose config`、命令参数或日志中放数据库 URL 和密钥值。
+`anon_alias_secret` 已由项目管理员安全恢复到 NAS 路径；本文及 Compose 不读取或展示其值。`MINIPROGRAM_APP_ID`、API 绑定地址和公网 API URL 配在 `/vol1/docker/blacklight-nas-data/.env`，可从 `deploy/nas/.env.example` 复制。不要在 `docker compose config`、命令参数或日志中放数据库 URL 和密钥值。
 
 ## PostgreSQL 初始化和验收
 
@@ -36,7 +36,7 @@ Compose 镜像基础为 `postgres:16-bookworm` 与 `node:22-bookworm-slim`。Pos
 3. 按文件名应用当前全部 19 个 CloudBase migration，并把文件名和 SHA-256 写入受限的 `nas_meta.schema_migrations`。遇到 checksum 不一致或已有迁移数异常时停止。
 4. 在迁移之后创建 NAS 本地会话表 `hg_sessions`。`token_hash` 是唯一 token 字段；不存明文会话 token。该表只授予 `service_role`。
 
-如第一次启动迁移中断，重启数据库后可再次运行容器内 `/usr/local/bin/local-apply-migrations`；迁移 ledger 允许安全续跑。不要清空已有 `pgdata` 来掩盖 migration 错误。
+数据库健康检查同时要求 `nas_meta.schema_migrations` 恰有 19 行及 `public.hg_sessions` 存在。因此 `pg_isready` 单独成功不会让未完成迁移的空库显示 healthy。如第一次启动迁移中断，重启数据库后可再次运行容器内 `/usr/local/bin/local-apply-migrations`；迁移 ledger 允许安全续跑。不要清空已有 `pgdata` 来掩盖 migration 错误。
 
 `blacklight-nas-data` 分支已在本机 PostgreSQL 16.15 临时实例完整回放 19 个 SQL 文件，并检查本地会话表、RLS 和 role grants。CloudBase PG 当前不可读，因此这证明 SQL 可在 PostgreSQL 16 执行，不证明源数据库版本或线上备份/导入完整性。
 
