@@ -34,7 +34,7 @@
 **关键规则**：`not_accessible` 用于"无权"和"不存在"两种情况，
 返回体完全相同，防止通过错误文案差异探测私密内容是否存在。
 
-## 4.3 action 清单（64 个）
+## 4.3 action 清单（66 个）
 
 ### 会话与成员资格
 
@@ -44,6 +44,8 @@
 | `membership/apply` | `{ displayName, inviteCode, rulesVersion }` | `{ state, applicationId }` | 已登录非成员 |
 | `membership/mine` | — | `{ state, reason, appliedAtText }` | 已登录 |
 | `me/profile` | — | `{ user, memberSince, stats }` | 成员 |
+| `me/levels` | — | `{ level, title, totalXp, currentLevelXp, nextLevelXp, progressXp, progressTargetXp, today }` | 成员，仅本人 |
+| `me/check-in` | — | 上述等级快照加 `{ awardedXp }` | 成员，仅本人 |
 | `me/profile/update` | `{ displayName?, avatarAssetId? }` | `{ id, displayName, avatar }` | 已登录 |
 | `me/exports` | — | `{ state: 'queued' }` | 成员 + `capabilities.export` |
 | `me/account/delete` | `{ confirm: '注销' }` | `{ state: 'pending' }` | 已登录 |
@@ -59,6 +61,33 @@
 已有历史 `pending` 申请的首次入社者，再次提交时重新校验邀请码与最新规则同意；复用原邀请码不重复计次，更换有效新码则扣一次新码额度，保留旧码使用记录。失效邀请码不会自动放行。
 曾被移除的成员继续返回 `pending`，由管理员恢复，不能用邀请码绕过移除；旧人工入社成员的新申请仍拒绝。
 身份、角色与目标状态只由服务端决定，客户端 `userId/role/status` 不参与授权。
+
+**`me/levels` / `me/check-in`**：身份只取 `ctx.viewer.userId`，两个 action 都忽略客户端传入的身份、经验值或日期。返回字段如下：
+
+```json
+{
+  "level": 3,
+  "title": "青枝",
+  "totalXp": 135,
+  "currentLevelXp": 120,
+  "nextLevelXp": 280,
+  "progressXp": 15,
+  "progressTargetXp": 160,
+  "today": {
+    "earnedXp": 8,
+    "maxXp": 19,
+    "checkedIn": true,
+    "reactions": 3,
+    "maxReactions": 5,
+    "comments": 1,
+    "maxComments": 3
+  }
+}
+```
+
+`title` 仅返回等级名称，页面以 `Lv.{{level}} {{title}}` 绘制名牌。`level` 门槛为 `0/40/120/280/520/860/1320/2000` XP；L8 的 `nextLevelXp` 为 `null`，仍累计 XP。L8 的 `progressTargetXp` 固定为 `0`，`progressXp` 返回超过 2000 的累计 XP；最高级不显示升级进度条。L1–L7 的 `progressXp` 是本级已得经验，`progressTargetXp` 是本级区间长度。每日经验按服务端 `Asia/Shanghai` 自然日统计：签到 +5（每天一次）、点赞已发布帖子/回应 +1（每天至多 5 个不同目标，目标终身只奖一次）、回应审核通过 +3（每天至多 3 个不同帖子，同一评论只奖一次），合计至多 19 XP。`today.earnedXp` 表示当天已发放的正向 XP 总量，违规反向流水会减少 `totalXp`，但不减少该字段或返还每日额度。`me/check-in` 幂等；当日重复签到返回 `awardedXp: 0` 和最新快照。
+
+点赞奖励绑定 `hg_reactions` 的真实插入，取消点赞不扣回经验；评论奖励绑定 `hg_comments` 从待审转为 `published`，自动与人工审核共用触发器。后续从 `published` 因违规转为 `hidden` / `rejected` 时追加反向流水；自行删除评论保留经验。migration 不回填既有点赞或既有已发布回应。匿名回应的作者归属和目标 ID 只进入服务端私有流水；接口仅返回本人汇总，不返回奖励来源。账号注销最终标记为 `deleted` 时清除等级汇总及流水。评论奖励若恰逢成员资格正在变更，审核事务返回可重试冲突，自动审核进入既有退避队列，人工审核刷新后重试；这样不会出现评论发布成功但 XP 写入失败的半提交。
 
 ### 内容
 

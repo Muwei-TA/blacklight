@@ -307,3 +307,15 @@ test('F3 database failures surface and never fall back to partially applied writ
   await assert.rejects(posts.toggleCommentReaction({ id: 'post-1', commentId: 'c1', next: true }, ctxFor('user-1')), /database unavailable/);
   assert.equal(rows('hg_reactions').length, 0);
 });
+
+test('F3 member-state lock conflict on reaction is returned as retryable conflict', async () => {
+  const { posts, fakeDb, rows } = harness();
+  fakeDb.getDb = () => ({ rpc: async () => {
+    throw Object.assign(new Error('XP_MEMBERSHIP_BUSY'), { code: '55P03' });
+  } });
+  await assert.rejects(
+    posts.toggleCommentReaction({ id: 'post-1', commentId: 'c1', next: true }, ctxFor('user-1')),
+    (error) => error.kind === 'conflict' && /成员状态正在变更/.test(error.message),
+  );
+  assert.equal(rows('hg_reactions').length, 0);
+});

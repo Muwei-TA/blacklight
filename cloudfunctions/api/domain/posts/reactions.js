@@ -22,6 +22,9 @@ async function persistReaction(userId, postId, commentId, next) {
     });
   } catch (err) {
     if (/REACTION_TARGET_CHANGED/.test(err.message)) throw errors.notAccessible({ postId });
+    if (/XP_MEMBERSHIP_BUSY|55P03/.test(`${err.code || ''} ${err.message || ''}`)) {
+      throw errors.conflict('成员状态正在变更，请稍后重试');
+    }
     throw err;
   }
 }

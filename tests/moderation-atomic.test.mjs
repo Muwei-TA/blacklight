@@ -11,6 +11,7 @@ const rootErrors = require('../shared/errors.js');
 const rootPresenters = require('../shared/presenters.js');
 const calls = [];
 let moderationPosts = [{ _id: 'post-1', title: '文章', body: '正文', status: 'published', visibility: 'public', createdAt: '2026-09-23T00:00:00.000Z' }];
+let rpcError = null;
 const fakeDb = {
   command: () => ({ in: (value) => ({ $op: 'in', value }) }),
   coll(name) {
@@ -42,6 +43,7 @@ const fakeDb = {
     return {
       async rpc(name, args) {
         calls.push({ name, args });
+        if (rpcError) throw rpcError;
         return { ok: true, status: 'published', version: 2 };
       },
     };
@@ -102,6 +104,15 @@ test('文集能力关闭时不能由管理决定旁路开启', async () => {
     (error) => error.kind === 'forbidden',
   );
   assert.equal(calls.length, 0);
+});
+
+test('评论奖励遇到成员资格并发更新时以可重试冲突返回', async () => {
+  rpcError = Object.assign(new Error('XP_MEMBERSHIP_BUSY'), { code: '55P03' });
+  await assert.rejects(
+    moderation.decideComment({ id: 'c-1', decision: 'approve', expectedVersion: 1, reason: '' }, ctx(moderator)),
+    (error) => error.kind === 'conflict' && /成员状态正在变更/.test(error.message),
+  );
+  rpcError = null;
 });
 
 test('普通成员不能调用原子管理决定', async () => {

@@ -37,6 +37,9 @@ function requiredExpectedVersion(payload) {
 function mapModerationError(error) {
   const marker = `${error && error.code ? error.code : ''} ${error && error.message ? error.message : ''}`;
   if (/PENDING_MEDIA/.test(marker)) return errors.pendingMedia();
+  if (/XP_MEMBERSHIP_BUSY|55P03/.test(marker)) {
+    return errors.conflict('成员状态正在变更，请稍后重试');
+  }
   if (/VERSION_CONFLICT|IDEMPOTENCY_CONFLICT|ALREADY_DECIDED|MEMBERSHIP_EXISTS|CONFLICT/.test(marker)) {
     return errors.conflict('条目已被更新，请刷新后重试', { field: 'expectedVersion' });
   }

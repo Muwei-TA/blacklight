@@ -11,6 +11,7 @@
 const { createRouter } = require('./shared/router');
 
 const session = require('./domain/session');
+const levels = require('./domain/levels');
 const posts = require('./domain/posts');
 const topics = require('./domain/topics');
 const boards = require('./domain/boards');
@@ -29,6 +30,8 @@ const handlers = {
   'membership/apply': session.apply,
   'membership/mine': session.myApplication,
   'me/profile': session.myProfile,
+  'me/levels': levels.getMyLevels,
+  'me/check-in': levels.checkIn,
   'me/profile/update': session.updateProfile,
   'me/exports': session.requestExport,
   'me/account/delete': session.requestAccountDeletion,
