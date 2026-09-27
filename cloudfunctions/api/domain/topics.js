@@ -1,11 +1,13 @@
 /** 话题领域用例 */
 
+const { createHash } = require('node:crypto');
 const { COLLECTIONS, TOPIC_STATUS, DEFAULT_CLUB_ID } = require('../shared/constants');
 const policies = require('../shared/policies');
 const validators = require('../shared/validators');
 const presenters = require('../shared/presenters');
 const errors = require('../shared/errors');
 const db = require('../shared/db');
+const { escapeRegex } = require('./search');
 
 const CATEGORY_TEXT = {
   life: '生活',
@@ -20,6 +22,15 @@ const CATEGORY_TEXT = {
 async function list(payload, ctx) {
   const cursor = validators.parseCursor(payload.cursor);
   const pageSize = validators.clampPageSize(payload.pageSize);
+
+  // Topics are club-only. Do not run a title query for guests.
+  if (!ctx.viewer.isMember) return { items: [], nextCursor: null };
+
+  const activeOnly = payload.status !== undefined && payload.status !== null && payload.status !== '';
+  if (activeOnly) validators.requireEnum(payload.status, 'status', [TOPIC_STATUS.ACTIVE]);
+  const query = payload.q === undefined || payload.q === null || payload.q === ''
+    ? ''
+    : validators.validateSearchQuery(payload.q);
   const _ = db.command();
 
   const where = { clubId: DEFAULT_CLUB_ID };
@@ -27,17 +38,22 @@ async function list(payload, ctx) {
     where.category = validators.requireString(payload.category, 'category', { max: 20 });
   }
 
-  if (ctx.viewer.isAdmin) {
+  if (activeOnly) {
+    // Apply the requested board status before cursor pagination so archived
+    // and pending rows cannot crowd active boards off the page.
+    where.status = TOPIC_STATUS.ACTIVE;
+  } else if (ctx.viewer.isAdmin) {
     where.status = _.in([TOPIC_STATUS.ACTIVE, TOPIC_STATUS.ARCHIVED, TOPIC_STATUS.PENDING]);
-  } else if (ctx.viewer.isMember) {
+  } else {
     // 待审话题只有提交者本人能看到自己的
     where.$or = [
       { status: _.in([TOPIC_STATUS.ACTIVE, TOPIC_STATUS.ARCHIVED]) },
       { status: TOPIC_STATUS.PENDING, ownerId: ctx.viewer.userId },
     ];
-  } else {
-    // 访客：首版话题均为社内，不返回任何话题
-    return { items: [], nextCursor: null };
+  }
+
+  if (query) {
+    where.title = db.getDb().RegExp({ regexp: escapeRegex(query), options: 'i' });
   }
 
   const { items, hasMore } = await db.paginate(COLLECTIONS.topics, where, { cursor, pageSize });
@@ -100,40 +116,77 @@ async function detail(payload, ctx) {
   };
 }
 
+function findTopicsByTitle(title) {
+  return db
+    .coll(COLLECTIONS.topics)
+    .where({ clubId: DEFAULT_CLUB_ID, title })
+    .limit(100)
+    .get()
+    .then((result) => result.data || []);
+}
+
+function duplicateTopicResult(topic, viewer) {
+  if (!topic) return null;
+  if (!policies.canReadTopic(viewer, topic)) {
+    // Do not disclose another member's pending topic id or status.
+    throw errors.conflict('已有同名话题正在审核，请更换名称后再试');
+  }
+  return { duplicated: true, id: topic._id, status: topic.status };
+}
+
+function topicIdForTitle(title) {
+  // A stable id makes simultaneous submissions of the same trimmed title
+  // collide on the primary key, without adding a schema migration.
+  return createHash('sha256').update(`${DEFAULT_CLUB_ID}\0${title}`, 'utf8').digest('hex');
+}
+
 /** POST /topics —— 社员提交话题，进入待审；同名引导参与 */
 async function create(payload, ctx) {
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
   const input = validators.validateTopicInput(payload);
 
-  const existing = await db
-    .coll(COLLECTIONS.topics)
-    .where({ clubId: DEFAULT_CLUB_ID, title: input.title })
-    .limit(1)
-    .get()
-    .catch(() => ({ data: [] }));
-
-  if (existing.data && existing.data.length > 0) {
-    // 不创建重复项，返回已有话题让前端引导参与
-    return { duplicated: true, id: existing.data[0]._id, status: existing.data[0].status };
+  // Archived titles remain reserved; reopening is an administrative decision.
+  // Prefer a readable active board, then archived, then the caller's pending
+  // row. A hidden pending match is reported without its id or status.
+  const matchesForTitle = await findTopicsByTitle(input.title);
+  const readableMatches = matchesForTitle.filter((topic) => policies.canReadTopic(ctx.viewer, topic));
+  const duplicate =
+    readableMatches.find((topic) => topic.status === TOPIC_STATUS.ACTIVE)
+    || readableMatches.find((topic) => topic.status === TOPIC_STATUS.ARCHIVED)
+    || readableMatches.find((topic) => topic.status === TOPIC_STATUS.PENDING && topic.ownerId === ctx.viewer.userId)
+    || readableMatches[0];
+  if (duplicate) return duplicateTopicResult(duplicate, ctx.viewer);
+  if (matchesForTitle.some((topic) => topic.status === TOPIC_STATUS.PENDING)) {
+    throw errors.conflict('已有同名话题正在审核，请更换名称后再试');
   }
 
-  const added = await db.coll(COLLECTIONS.topics).add({
-    data: {
-      clubId: DEFAULT_CLUB_ID,
-      ownerId: ctx.viewer.userId,
-      title: input.title,
-      description: input.description,
-      category: input.category,
-      categoryText: CATEGORY_TEXT[input.category] || '',
-      icon: 'chat-bubble-1',
-      // 新话题一律社内，且需管理员确认
-      status: TOPIC_STATUS.PENDING,
-      postCount: 0,
-      version: 1,
-      createdAt: db.serverDate(),
-      updatedAt: db.serverDate(),
-    },
-  });
+  const id = topicIdForTitle(input.title);
+  const data = {
+    _id: id,
+    clubId: DEFAULT_CLUB_ID,
+    ownerId: ctx.viewer.userId,
+    title: input.title,
+    description: input.description,
+    category: input.category,
+    categoryText: CATEGORY_TEXT[input.category] || '',
+    icon: 'chat-bubble-1',
+    // 新话题一律社内，且需管理员确认
+    status: TOPIC_STATUS.PENDING,
+    postCount: 0,
+    version: 1,
+    createdAt: db.serverDate(),
+    updatedAt: db.serverDate(),
+  };
+
+  let added;
+  try {
+    added = await db.coll(COLLECTIONS.topics).add({ data });
+  } catch (error) {
+    if (String(error && error.code) !== '23505') throw error;
+    const raced = await db.findOneById(COLLECTIONS.topics, id);
+    if (!raced || raced.clubId !== DEFAULT_CLUB_ID || raced.title !== input.title) throw error;
+    return duplicateTopicResult(raced, ctx.viewer);
+  }
 
   return { duplicated: false, id: added._id, status: TOPIC_STATUS.PENDING };
 }

@@ -128,14 +128,15 @@
 
 | action | payload | 返回 |
 |---|---|---|
-| `topics/list` | `{ category?, cursor? }` | `{ items, nextCursor }` |
+| `topics/list` | `{ category?, status?: 'active', q?, cursor?, pageSize? }` | `{ items, nextCursor }` |
 | `topics/detail` | `{ id, cursor? }` | `{ topic, canPost, items, nextCursor }` |
 | `topics/create` | `{ title, description, category }` | `{ duplicated, id, status }` |
 | `topics/follow` | `{ id, next }` | `{ ok }` |
 | `me/topics` | `{ cursor? }` | `{ items, nextCursor }` |
 
-`topics/create` 遇同名返回 `{ duplicated: true, id }`，**不创建重复项**，
-前端据此引导"去参与"。新话题一律 `pending` + 社内。
+`topics/list` 的 `status` 目前只接受 `active`。该条件在服务端写入查询条件后再做游标分页；省略时保留原列表规则。`q` 是 1–50 字的普通标题子串搜索，大小写不敏感，正则符号按字面处理；它和成员可读范围、分类及状态条件一起在分页前应用。话题只对有效成员和管理员可读，访客始终得到空列表。
+
+`topics/create` 按去除首尾空白后的标题精确匹配。命中可读的 active 或 archived 话题，或调用者自己可读的 pending 话题，返回 `{ duplicated: true, id, status }`，不创建重复项。archived 标题仍被占用，归档话题可读但不可投稿。命中其他成员的 pending 话题返回 `conflict`，不包含该话题的 ID 或状态；判重查询失败会使请求失败，不会继续写入。相同标题的新请求使用稳定记录 ID，能通过数据库主键冲突收敛同版本并发提交；已有旧记录仍以服务端标题查询为准。新话题一律 `pending` + 社内。
 
 ### 文集
 
