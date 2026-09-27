@@ -12,6 +12,7 @@ const COLLECTIONS = {
   reactions: 'hg_reactions',
   bookmarks: 'hg_bookmarks',
   topics: 'hg_topics',
+  boards: 'hg_boards',
   topicFollows: 'hg_topic_follows',
   collections: 'hg_collections',
   collectionEntries: 'hg_collection_entries',
@@ -58,6 +59,8 @@ const POST_STATUS = {
 };
 
 const TOPIC_STATUS = { PENDING: 'pending', ACTIVE: 'active', ARCHIVED: 'archived' };
+
+const BOARD_STATUS = { PENDING: 'pending', ACTIVE: 'active', REJECTED: 'rejected' };
 
 const ROLE = { GUEST: 'guest', MEMBER: 'member', ADMIN: 'admin', MODERATOR: 'moderator' };
 
@@ -126,6 +129,7 @@ module.exports = {
   IDENTITY_MODE,
   POST_STATUS,
   TOPIC_STATUS,
+  BOARD_STATUS,
   ROLE,
   MEMBER_STATUS,
   ASSET_STATUS,

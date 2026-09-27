@@ -98,9 +98,13 @@ function validatePostInput(payload = {}) {
   }
 
   const topicId = optionalId(payload.topicId, 'topicId');
+  const boardId = optionalId(payload.boardId, 'boardId');
   // 仅自己内容不得关联公共话题
   if (visibility === VISIBILITY.PRIVATE && topicId) {
     throw invalidInput('只有自己可见的内容不能关联话题', { field: 'topicId' });
+  }
+  if (visibility === VISIBILITY.PRIVATE && boardId) {
+    throw invalidInput('只有自己可见的内容不能关联板块', { field: 'boardId' });
   }
 
   return {
@@ -111,6 +115,7 @@ function validatePostInput(payload = {}) {
     visibility,
     identityMode,
     topicId,
+    boardId,
     commentsEnabled: visibility === VISIBILITY.PRIVATE ? false : payload.commentsEnabled !== false,
     collectionId: optionalId(payload.collectionId, 'collectionId'),
     consentGranted: payload.consentGranted === true,
@@ -133,6 +138,16 @@ function validateTopicInput(payload = {}) {
       allowEmpty: true,
     }),
     category: requireString(payload.category, '分类', { max: 20 }),
+  };
+}
+
+function validateBoardInput(payload = {}) {
+  return {
+    title: requireString(payload.title, '板块名称', { max: CONTENT_LIMITS.topicTitle }),
+    description: requireString(payload.description, '板块说明', {
+      max: CONTENT_LIMITS.topicDescription,
+      allowEmpty: true,
+    }),
   };
 }
 
@@ -183,6 +198,7 @@ module.exports = {
   validatePostInput,
   validateCommentInput,
   validateTopicInput,
+  validateBoardInput,
   validateUploadIntent,
   validateDisplayName,
   validateSearchQuery,

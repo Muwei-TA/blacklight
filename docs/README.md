@@ -18,8 +18,8 @@
 | 00 | `README.md` | 索引、协作规则、交付状态 | ✅ |
 | 01 | `01-decisions.md` | 技术选型决策记录、边界、G0 阻断项 | ✅ |
 | 02 | `02-architecture.md` | 分层、目录、shared 同步机制、编码规范 | ✅ |
-| 03 | `03-data-model.md` | 21 个集合的字段、索引、权限设置 | ✅ |
-| 04 | `04-api-contract.md` | 57 个 action 的入参、返回、错误码 | ✅ |
+| 03 | `03-data-model.md` | 22 个业务表的字段、索引、权限设置 | ✅ |
+| 04 | `04-api-contract.md` | 64 个 action 的入参、返回、错误码 | ✅ |
 | 05 | `05-authorization.md` | 鉴权实现、越权防线、匿名隔离 | ✅ **最高优先级** |
 | 06 | `06-media-pipeline.md` | 上传链路、内容审核、回调、撤权窗口 | |
 | 07 | `07-governance.md` | 状态机、举报申诉、审计、注销与保留 | |

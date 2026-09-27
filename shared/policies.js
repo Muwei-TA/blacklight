@@ -12,7 +12,7 @@
  * 3. 新增可见范围或角色时，必须同步更新 tests/policies.test.mjs 的越权用例。
  */
 
-const { VISIBILITY, POST_STATUS, ROLE, MEMBER_STATUS, TOPIC_STATUS } = require('./constants');
+const { VISIBILITY, POST_STATUS, ROLE, MEMBER_STATUS, TOPIC_STATUS, BOARD_STATUS, DEFAULT_CLUB_ID } = require('./constants');
 
 /**
  * 构造访问者上下文。唯一合法的 viewer 来源。
@@ -235,6 +235,22 @@ function canPostToTopic(viewer, topic) {
   return topic.status === TOPIC_STATUS.ACTIVE && viewer.isMember;
 }
 
+/** Boards are club-only. Pending/rejected boards are visible only to their owner and moderators. */
+function canReadBoard(viewer, board) {
+  if (!board) return false;
+  if (board.clubId !== DEFAULT_CLUB_ID) return false;
+  if (board.status === BOARD_STATUS.ACTIVE) return viewer.isMember;
+  if (board.status === BOARD_STATUS.PENDING || board.status === BOARD_STATUS.REJECTED) {
+    return (!!viewer.userId && board.ownerId === viewer.userId) || viewer.isAdmin;
+  }
+  return false;
+}
+
+function canPostToBoard(viewer, board, capabilities) {
+  return !!(board && board.status === BOARD_STATUS.ACTIVE
+    && canUsePublishing(viewer, capabilities));
+}
+
 /** 文集：社内文集仅成员可见；公开文集所有人可见 */
 function canReadCollection(viewer, collection) {
   if (!collection) return false;
@@ -327,6 +343,8 @@ module.exports = {
   canUploadVideo,
   canReadTopic,
   canPostToTopic,
+  canReadBoard,
+  canPostToBoard,
   canReadCollection,
   canIncludeInCollection,
   canAccessModeration,

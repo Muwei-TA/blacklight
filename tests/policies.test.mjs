@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const policies = require('../shared/policies.js');
-const { VISIBILITY, POST_STATUS, ROLE, MEMBER_STATUS, TOPIC_STATUS } = require('../shared/constants.js');
+const { VISIBILITY, POST_STATUS, ROLE, MEMBER_STATUS, TOPIC_STATUS, BOARD_STATUS } = require('../shared/constants.js');
 const { assertNoIdentityLeak } = require('../shared/anonymity.js');
 const presenters = require('../shared/presenters.js');
 
@@ -274,6 +274,30 @@ test('归档话题可读但不可投稿', () => {
 
 test('访客看不到社内话题', () => {
   assert.equal(policies.canReadTopic(guest, { _id: 't3', status: TOPIC_STATUS.ACTIVE }), false);
+});
+
+test('active 板块仅有效成员可读，pending/rejected 仅创建者与管理员可读', () => {
+  const active = { _id: 'b1', clubId: 'heiguang', status: BOARD_STATUS.ACTIVE };
+  const pending = { _id: 'b2', clubId: 'heiguang', ownerId: 'u_member', status: BOARD_STATUS.PENDING };
+  const rejected = { ...pending, status: BOARD_STATUS.REJECTED };
+  assert.equal(policies.canReadBoard(member, active), true);
+  assert.equal(policies.canReadBoard(guest, active), false);
+  assert.equal(policies.canReadBoard(removed, active), false);
+  assert.equal(policies.canReadBoard(member, pending), true);
+  assert.equal(policies.canReadBoard(other, pending), false);
+  assert.equal(policies.canReadBoard(admin, pending), true);
+  assert.equal(policies.canReadBoard(member, rejected), true);
+  assert.equal(policies.canReadBoard(other, rejected), false);
+  assert.equal(policies.canReadBoard(member, { ...active, clubId: 'other-club' }), false);
+});
+
+test('板块投稿要求 active 板块与服务端发布能力', () => {
+  const active = { _id: 'b1', clubId: 'heiguang', status: BOARD_STATUS.ACTIVE };
+  const pending = { ...active, status: BOARD_STATUS.PENDING };
+  assert.equal(policies.canPostToBoard(member, active, { publishing: true }), true);
+  assert.equal(policies.canPostToBoard(member, active, { publishing: false }), false);
+  assert.equal(policies.canPostToBoard(member, pending, { publishing: true }), false);
+  assert.equal(policies.canPostToBoard(guest, active, { publishing: true }), false);
 });
 
 test('公开文集不能收录社内原帖', () => {

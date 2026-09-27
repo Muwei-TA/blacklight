@@ -16,6 +16,7 @@ const {
   VISIBILITY,
   IDENTITY_MODE,
   ASSET_STATUS,
+  BOARD_STATUS,
   NOTIFY_TYPE,
   DEFAULT_CLUB_ID,
 } = require('../shared/constants');
@@ -68,12 +69,14 @@ async function hydrateCards(posts, ctx) {
     .map((p) => p.ownerId);
   const assetIds = posts.flatMap((p) => p.assetIds || []);
   const topicIds = posts.map((p) => p.topicId).filter(Boolean);
+  const boardIds = posts.map((p) => p.boardId).filter(Boolean);
   const postIds = posts.map((p) => p._id);
 
-  const [users, assets, topics, myReactions, myBookmarks, aliasDocs] = await Promise.all([
+  const [users, assets, topics, boards, myReactions, myBookmarks, aliasDocs] = await Promise.all([
     db.findByIds(COLLECTIONS.users, namedOwnerIds),
     db.findByIds(COLLECTIONS.assets, assetIds),
     db.findByIds(COLLECTIONS.topics, topicIds),
+    db.findByIds(COLLECTIONS.boards, boardIds),
     ctx.viewer.userId ? loadMyFlags(COLLECTIONS.reactions, ctx.viewer.userId, postIds) : Promise.resolve(new Set()),
     ctx.viewer.userId ? loadMyFlags(COLLECTIONS.bookmarks, ctx.viewer.userId, postIds) : Promise.resolve(new Set()),
     loadAliases(posts),
@@ -81,6 +84,7 @@ async function hydrateCards(posts, ctx) {
 
   const userById = new Map(users.map((u) => [u._id, u]));
   const topicById = new Map(topics.map((t) => [t._id, t]));
+  const boardById = new Map(boards.map((b) => [b._id, b]));
 
   const readableAssets = await require('./assets').signReadableAssets(assets, posts, ctx);
   return posts.map((post) =>
@@ -90,6 +94,7 @@ async function hydrateCards(posts, ctx) {
       alias: aliasDocs.get(post._id),
       assets: readableAssets,
       topic: topicById.get(post.topicId),
+      board: policies.canReadBoard(ctx.viewer, boardById.get(post.boardId)) ? boardById.get(post.boardId) : null,
       reacted: myReactions.has(post._id),
       bookmarked: myBookmarks.has(post._id),
       now: ctx.now,
@@ -139,6 +144,13 @@ async function listFeed(payload, ctx) {
 
   const extra = {};
   if (payload.topicId) extra.topicId = validators.optionalId(payload.topicId, 'topicId');
+  const boardId = validators.optionalId(payload.boardId, 'boardId');
+  if (boardId) {
+    const board = await db.findOneById(COLLECTIONS.boards, boardId);
+    if (!policies.canReadBoard(ctx.viewer, board)) throw errors.notAccessible({ boardId });
+    if (board.status !== BOARD_STATUS.ACTIVE) return { items: [], nextCursor: null };
+    extra.boardId = boardId;
+  }
   if (payload.type && payload.type !== 'all') {
     if (payload.type === 'article') extra.kind = 'article';
     else if (payload.type === 'video') extra.hasVideo = true;
@@ -172,12 +184,13 @@ async function getDetail(payload, ctx) {
     throw errors.notAccessible({ postId: id, role: ctx.viewer.role });
   }
 
-  const [authorUser, assets, topic, aliasMap, reacted, bookmarked, consent] = await Promise.all([
+  const [authorUser, assets, topic, board, aliasMap, reacted, bookmarked, consent] = await Promise.all([
     post.identityMode === IDENTITY_MODE.ANONYMOUS
       ? Promise.resolve(null)
       : db.findOneById(COLLECTIONS.users, post.ownerId),
     db.findByIds(COLLECTIONS.assets, post.assetIds || []),
     post.topicId ? db.findOneById(COLLECTIONS.topics, post.topicId) : Promise.resolve(null),
+    post.boardId ? db.findOneById(COLLECTIONS.boards, post.boardId) : Promise.resolve(null),
     loadAliases([post]),
     ctx.viewer.userId ? loadMyFlags(COLLECTIONS.reactions, ctx.viewer.userId, [id]) : Promise.resolve(new Set()),
     ctx.viewer.userId ? loadMyFlags(COLLECTIONS.bookmarks, ctx.viewer.userId, [id]) : Promise.resolve(new Set()),
@@ -191,6 +204,7 @@ async function getDetail(payload, ctx) {
     alias: aliasMap.get(post._id),
     assets: readableAssets,
     topic,
+    board: policies.canReadBoard(ctx.viewer, board) ? board : null,
     reacted: reacted.has(id),
     bookmarked: bookmarked.has(id),
     collectionGranted: !!(consent && !consent.revokedAt),
@@ -221,9 +235,10 @@ async function createPost(payload, ctx) {
   if (input.assetIds.length && !policies.canUseUploads(ctx.viewer, ctx.capabilities)) throw errors.forbidden({ reason: 'uploads disabled' });
 
   // 附件与话题互不依赖：并行取回后再校验，缩短发布链路的串行开销
-  const [assets, topic] = await Promise.all([
+  const [assets, topic, board] = await Promise.all([
     input.assetIds.length > 0 ? db.findByIds(COLLECTIONS.assets, input.assetIds) : Promise.resolve([]),
     input.topicId ? db.findOneById(COLLECTIONS.topics, input.topicId) : Promise.resolve(null),
+    input.boardId ? db.findOneById(COLLECTIONS.boards, input.boardId) : Promise.resolve(null),
   ]);
 
   // 校验附件归属与状态：只能绑定本人已验证的附件
@@ -250,6 +265,9 @@ async function createPost(payload, ctx) {
   if (input.topicId && !policies.canPostToTopic(ctx.viewer, topic)) {
     throw errors.notAccessible({ topicId: input.topicId });
   }
+  if (input.boardId && !policies.canPostToBoard(ctx.viewer, board, ctx.capabilities)) {
+    throw errors.notAccessible({ boardId: input.boardId });
+  }
 
   // 仅自己内容不进审核流程，直接保存
   const isPrivate = input.visibility === VISIBILITY.PRIVATE;
@@ -270,6 +288,7 @@ async function createPost(payload, ctx) {
       identityMode: input.identityMode,
       commentsEnabled: input.commentsEnabled,
       topicId: input.topicId,
+      boardId: input.boardId,
       status,
       version: 1,
       reactionCount: 0,
@@ -367,6 +386,7 @@ async function changeVisibility(payload, ctx) {
 
   const version = await db.updateWithVersion(COLLECTIONS.posts, id, expectedVersion, {
     visibility: next,
+    ...(next === VISIBILITY.PRIVATE ? { boardId: '' } : {}),
     // 权限版本号递增：用于媒体链接与缓存失效
     permissionVersion: (post.permissionVersion || 0) + 1,
   });

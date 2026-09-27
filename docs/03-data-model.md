@@ -5,7 +5,7 @@
 
 ## 3.1 权限总则
 
-**所有 21 个集合的云数据库权限都设为「仅管理端可读写」（ADMINONLY）。**
+**所有 22 个业务表的 PostgreSQL 权限都设为仅服务端可读写。**
 
 理由见 `01-decisions.md` 1.1：CloudBase 的数据库权限粒度做不到
 "社内成员 且 已发布 且 非匿名映射"这种条件。因此：
@@ -77,6 +77,7 @@
 | `identityMode` | string | `named` / `anonymous` |
 | `commentsEnabled` | bool | `private` 时强制 false |
 | `topicId` | string | 最多一个主话题 |
+| `boardId` | string | 可选板块；与 `topicId` 独立且可并存；私密帖子禁止关联 |
 | `status` | string | 状态机见 `07` |
 | `version` | number | 乐观锁 |
 | `permissionVersion` | number | 范围变更/隐藏时递增，用于媒体与缓存失效 |
@@ -92,7 +93,7 @@ idx_feed: clubId + status + visibility + createdAt(-1)
 这个复合索引的字段顺序与 `buildFeedWhere()` 的过滤条件一致。
 **游标排序字段必须在同一个索引里**，否则分页会退化为全表扫描。
 
-其余：`ownerId + createdAt`、`topicId + createdAt`、`status + createdAt`
+其余：`ownerId + createdAt`、`topicId + createdAt`、`boardId + status + visibility + createdAt`、`status + createdAt`
 
 **`hg_comments`**：`postId`、`ownerId`、`replyToId`、`body`、`identityMode`、`status`、`version`。
 一级评论 + 定向回复，不做嵌套树。
@@ -118,7 +119,9 @@ bookmarks 另有 `userId + createdAt`（收藏分页）。
 | `traceId` | 异步审核追踪 ID |
 | `postId` / `postVersion` | 绑定关系，防止任意 fileId 挂接 |
 
-### 话题与文集
+### 板块、话题与文集
+
+**`hg_boards`**：独立板块对象，不复用 `hg_topics`。字段包括 `clubId`、`ownerId`、`title`、`description`、`status`、`version`、`createdAt`、`updatedAt` 和审核理由。`status` 为 `pending` / `active` / `rejected`。每个社团内去除首尾空白并忽略大小写后的标题，在 pending 或 active 状态唯一；被拒项目不占用标题。active 板块仅有效成员可读；pending/rejected 仅创建者与管理员可读。表启用 RLS，撤销 `PUBLIC`、`anon`、`authenticated` 权限，只授予 `service_role`。
 
 **`hg_topics`**：`status` 为 `pending` / `active` / `archived`，`postCount` 参与计数。
 **`hg_topic_follows`**：`_id` 为 `{userId}:{topicId}`。索引：`userId`（我的话题与列表装配）。

@@ -13,6 +13,7 @@ const {
   COLLECTIONS,
   POST_STATUS,
   TOPIC_STATUS,
+  BOARD_STATUS,
   MEMBER_STATUS,
   VISIBILITY,
   DEFAULT_CLUB_ID,
@@ -23,7 +24,7 @@ const presenters = require('../shared/presenters');
 const errors = require('../shared/errors');
 const db = require('../shared/db');
 
-const QUEUES = ['comment', 'content', 'topic', 'member', 'report', 'collection'];
+const QUEUES = ['comment', 'content', 'topic', 'board', 'member', 'report', 'collection'];
 
 function requiredExpectedVersion(payload) {
   const version = Number(payload.expectedVersion);
@@ -63,6 +64,24 @@ async function callModeration(action, input, ctx) {
   } catch (error) {
     const mapped = mapModerationError(error);
     if (mapped !== error) throw mapped;
+    throw error;
+  }
+}
+
+async function callBoardModeration(input, ctx) {
+  try {
+    return await db.getDb().rpc('hg_decide_board', {
+      p_actor_id: ctx.viewer.userId,
+      p_input: input,
+    });
+  } catch (error) {
+    const marker = `${error && error.code ? error.code : ''} ${error && error.message ? error.message : ''}`;
+    if (/FORBIDDEN/.test(marker)) throw errors.forbidden();
+    if (/BOARD_NOT_FOUND/.test(marker)) throw errors.notAccessible();
+    if (/VERSION_CONFLICT|BOARD_ALREADY_DECIDED/.test(marker)) {
+      throw errors.conflict('板块已被更新，请刷新后重试', { field: 'expectedVersion' });
+    }
+    if (/INVALID|REASON_REQUIRED/.test(marker)) throw errors.invalidInput('请求参数不合法');
     throw error;
   }
 }
@@ -133,6 +152,27 @@ async function listQueue(payload, ctx) {
         version: topic.version || 1,
         submittedAtText: presenters.formatRelativeTime(topic.createdAt, ctx.now),
         statusText: '等待确认',
+      })),
+      nextCursor: hasMore && items.length > 0 ? validators.buildCursor(items[items.length - 1]) : null,
+    };
+  }
+
+  if (queue === 'board') {
+    const { items, hasMore } = await db.paginate(
+      COLLECTIONS.boards,
+      { clubId: DEFAULT_CLUB_ID, status: BOARD_STATUS.PENDING },
+      { cursor, pageSize, order: 'asc' },
+    );
+    return {
+      items: items.map((board) => ({
+        id: board._id,
+        queue,
+        title: board.title || '',
+        summary: board.description || '',
+        status: board.status,
+        version: board.version || 1,
+        submittedAtText: presenters.formatRelativeTime(board.createdAt, ctx.now),
+        statusText: '等待管理员审核',
       })),
       nextCursor: hasMore && items.length > 0 ? validators.buildCursor(items[items.length - 1]) : null,
     };
@@ -258,6 +298,19 @@ async function decideTopic(payload, ctx) {
   return callModeration('topic.decide', { id, decision, reason, expectedVersion }, ctx);
 }
 
+/** POST /admin/board/decide —— 板块审核与话题审核完全分离。 */
+async function decideBoard(payload, ctx) {
+  if (!policies.canAccessModeration(ctx.viewer)) throw errors.forbidden({ reason: 'not moderator' });
+
+  const id = validators.requireId(payload.id, 'id');
+  const decision = validators.requireEnum(payload.decision, 'decision', ['approve', 'reject']);
+  const expectedVersion = requiredExpectedVersion(payload);
+  const reason = decision === 'approve'
+    ? validators.requireString(payload.reason, '备注', { max: 200, allowEmpty: true })
+    : validators.requireString(payload.reason, '处理理由', { max: 200 });
+  return callBoardModeration({ id, decision, reason, expectedVersion }, ctx);
+}
+
 /** POST /admin/members/applications/{id} */
 async function decideMembership(payload, ctx) {
   if (!policies.canAccessModeration(ctx.viewer)) throw errors.forbidden({ reason: 'not moderator' });
@@ -354,6 +407,7 @@ module.exports = {
   decideContent,
   decideComment,
   decideTopic,
+  decideBoard,
   decideMembership,
   decideReport,
   decideCollection,
