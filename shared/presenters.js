@@ -124,7 +124,7 @@ function presentMedia(post, assets = []) {
  * 列表卡片 DTO。字段与前端 docs/04 的 PostCardDTO 严格对应。
  */
 function presentPostCard(post, context = {}) {
-  const { viewer, authorUser, alias, assets, topic, reacted, bookmarked, now } = context;
+  const { viewer, authorUser, alias, assets, topic, board, reacted, bookmarked, now } = context;
   return {
     id: post._id,
     version: post.version || 1,
@@ -138,6 +138,7 @@ function presentPostCard(post, context = {}) {
     identityMode: post.identityMode,
     author: presentAuthor({ post, authorUser, alias }),
     topic: topic ? { id: topic._id, title: topic.title } : null,
+    board: board ? { id: board._id, title: board.title } : null,
     media: presentMedia(post, assets),
     event: post.event || null,
     counters: {

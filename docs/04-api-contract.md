@@ -34,7 +34,7 @@
 **关键规则**：`not_accessible` 用于"无权"和"不存在"两种情况，
 返回体完全相同，防止通过错误文案差异探测私密内容是否存在。
 
-## 4.3 action 清单（60 个）
+## 4.3 action 清单（64 个）
 
 ### 会话与成员资格
 
@@ -64,7 +64,7 @@
 
 | action | payload | 返回 | 权限 |
 |---|---|---|---|
-| `posts/list` | `{ cursor?, type?, topicId?, filter?, pageSize? }` | `{ items: PostCardDTO[], nextCursor }` | 任意（按范围过滤） |
+| `posts/list` | `{ cursor?, type?, topicId?, boardId?, filter?, pageSize? }` | `{ items: PostCardDTO[], nextCursor }` | 任意（按范围过滤） |
 | `posts/detail` | `{ id }` | `PostDetailDTO` | `canReadPost` |
 | `posts/create` | 见下 | `{ id, version, state }` | 成员 |
 | `posts/visibility` | `{ id, visibility, expectedVersion }` | `{ ok, visibility, version }` | 作者，**仅缩小** |
@@ -89,6 +89,7 @@
   "visibility": "public | club | private",
   "identityMode": "named | anonymous",
   "topicId": "可选，private 时禁止",
+  "boardId": "可选，与 topicId 独立且可并存；private 时禁止",
   "commentsEnabled": true,
   "collectionId": "可选，文集投稿",
   "consentGranted": false,
@@ -120,6 +121,17 @@
 3. 删除是软删除：`status: 'deleted'`。已删除的定向回复不再返回；已删除的一级回应若仍有可见回复，以墓碑 DTO 返回（`deleted: true`、固定文案「这条回应已被删除。」、无作者信息），否则整条隐藏。
 4. 回应共鸣复用 `hg_reactions`，`_id = {userId}:comment:{commentId}`，文档带 `postId` + `commentId`；worker 的共鸣聚合只统计无 `commentId` 的记录，帖子删除时按 `postId` 一并回收。
 
+**`PostCardDTO` 的板块与话题字段**：
+
+```ts
+{
+  topic: { id: string, title: string } | null,
+  board: { id: string, title: string } | null
+}
+```
+
+两字段分别从 `topicId` 与 `boardId` 装配，可同时存在。无权读取板块时 `board` 为 `null`；不会把板块写入 `topic`。
+
 **`me/contents` 的 tab**：`published` / `pending` / `private` / `bookmark`。
 `bookmark` 会逐条复核权限，失效项返回
 `{ id, unavailable: true, placeholder: '这条内容当前不可访问' }` —— **不返回摘要**。
@@ -128,15 +140,30 @@
 
 | action | payload | 返回 |
 |---|---|---|
-| `topics/list` | `{ category?, status?: 'active', q?, cursor?, pageSize? }` | `{ items, nextCursor }` |
+| `topics/list` | `{ category?, cursor? }` | `{ items, nextCursor }` |
 | `topics/detail` | `{ id, cursor? }` | `{ topic, canPost, items, nextCursor }` |
 | `topics/create` | `{ title, description, category }` | `{ duplicated, id, status }` |
 | `topics/follow` | `{ id, next }` | `{ ok }` |
 | `me/topics` | `{ cursor? }` | `{ items, nextCursor }` |
 
-`topics/list` 的 `status` 目前只接受 `active`。该条件在服务端写入查询条件后再做游标分页；省略时保留原列表规则。`q` 是 1–50 字的普通标题子串搜索，大小写不敏感，正则符号按字面处理；它和成员可读范围、分类及状态条件一起在分页前应用。话题只对有效成员和管理员可读，访客始终得到空列表。
+`topics/create` 遇同名返回 `{ duplicated: true, id }`，**不创建重复项**，
+前端据此引导"去参与"。新话题一律 `pending` + 社内。
 
-`topics/create` 按去除首尾空白后的标题精确匹配。命中可读的 active 或 archived 话题，或调用者自己可读的 pending 话题，返回 `{ duplicated: true, id, status }`，不创建重复项。archived 标题仍被占用，归档话题可读但不可投稿。命中其他成员的 pending 话题返回 `conflict`，不包含该话题的 ID 或状态；判重查询失败会使请求失败，不会继续写入。相同标题的新请求使用稳定记录 ID，能通过数据库主键冲突收敛同版本并发提交；已有旧记录仍以服务端标题查询为准。新话题一律 `pending` + 社内。
+### 板块
+
+板块是独立于话题的帖子分流对象，使用 `hg_boards`，不改变 `topics/*` 行为。
+
+| action | payload | 返回 | 权限 |
+|---|---|---|---|
+| `boards/list` | `{ q?, status?: 'active', cursor?, pageSize? }` | `{ items: BoardDTO[], nextCursor }` | 有效成员；访客返回空列表 |
+| `boards/detail` | `{ id, cursor?, pageSize? }` | `{ board: BoardDTO, items: PostCardDTO[], nextCursor, canPost }` | active 对有效成员开放；pending/rejected 仅创建者或管理员可读 |
+| `boards/create` | `{ title, description }` | `{ duplicated, id, status }` | 有效成员；管理员直接 active，其他成员进入 pending |
+
+`BoardDTO` 字段为 `{ id, title, description, status, statusText, version, createdAtText, rejectReason? }`。拒绝理由只随创建者或管理员可读的 rejected 板块详情返回。列表只返回 active 板块；`status` 只接受 `active`，`q` 为 1–50 字标题子串且按字面匹配。可读的 pending/rejected 详情返回空 `items` 且 `canPost: false`。同名 pending 项属于其他成员时返回 `conflict`，响应不含该板块 ID 或状态。标题唯一性在 PostgreSQL 中按去空格、忽略大小写处理，避免并发重名。
+
+管理员 `queue: 'board'` 条目字段为 `{ id, queue, title, summary, status, version, submittedAtText, statusText }`，不返回创建者身份。`admin/board/decide` 使用 `expectedVersion`；reject 必须带处理理由，状态、版本和审计记录在同一 PG 事务提交。
+
+`posts/list` 的 `boardId` 先校验板块可读性及 active 状态，再把 boardId 放入分页查询条件；pending/rejected 板块只对创建者或管理员可见，且不返回帖子。`posts/create` 的 `boardId` 可与 `topicId` 同时提供；板块必须 active，且服务端再次验证成员资格。私密帖子不得关联板块。
 
 ### 文集
 
@@ -189,9 +216,10 @@
 
 | action | payload | 返回 |
 |---|---|---|
-| `admin/queue` | `{ queue, cursor? }` | `{ items, nextCursor }` |
+| `admin/queue` | `{ queue: 'content'|'topic'|'board'|..., cursor? }` | `{ items, nextCursor }` |
 | `admin/content/decide` | `{ id, decision, reason, expectedVersion }` | `{ ok, status }` |
 | `admin/topic/decide` | `{ id, decision, reason? }` | `{ ok, status }` |
+| `admin/board/decide` | `{ id, decision: 'approve'|'reject', expectedVersion, reason? }` | `{ ok, status, version }` |
 | `admin/membership/decide` | `{ id, decision, reason? }` | `{ ok }` |
 | `admin/report/decide` | `{ id, decision, reason }` | `{ ok }` |
 | `admin/collection/decide` | `{ id, decision, reason? }` | `{ ok }` |

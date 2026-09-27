@@ -42,6 +42,9 @@ function matches(doc, query = {}) {
       const expected = scalar(value.value);
       if (value.$op === 'in') return expected.includes(actual);
       if (value.$op === 'exists') return Object.hasOwn(doc, key) === expected;
+      if (value.$op === 'regex') {
+        try { return new RegExp(expected, value.options || '').test(String(actual || '')); } catch (_) { return false; }
+      }
       if (value.$op === 'neq') return actual !== expected;
       if (value.$op === 'lt') return actual < expected;
       if (value.$op === 'lte') return actual <= expected;
@@ -108,6 +111,7 @@ export function createCommentMemoryDatabase(seed = {}) {
   }));
   const idempotency = new Map();
   let stampSequence = 0;
+  let paginationCalls = 0;
   const rows = (table) => store.get(table) || [];
   const commands = Object.fromEntries(
     ['in', 'exists', 'neq', 'lt', 'lte', 'gt', 'gte', 'inc'].map((op) => [op, (value) => ({ $op: op, value })]),
@@ -152,6 +156,7 @@ export function createCommentMemoryDatabase(seed = {}) {
       return query;
     },
     async paginate(table, where, { cursor, pageSize, order = 'desc' }) {
+      paginationCalls += 1;
       const sorted = sortRows(rows(table).filter((doc) => matches(doc, where)), [
         ['createdAt', order], ['_id', order],
       ]);
@@ -179,6 +184,77 @@ export function createCommentMemoryDatabase(seed = {}) {
     getDb() {
       return {
         async rpc(name, args) {
+          if (name === 'hg_create_board') {
+            const actorId = args.p_actor_id;
+            const member = rows('hg_memberships').find((entry) => entry.userId === actorId
+              && entry.clubId === 'heiguang' && entry.status === 'active');
+            if (!member) throw new Error('FORBIDDEN');
+            const boardInput = args.p_board;
+            const normalizedTitle = boardInput.title.trim().toLocaleLowerCase();
+            const duplicate = rows('hg_boards').find((entry) => entry.clubId === 'heiguang'
+              && ['pending', 'active'].includes(entry.status)
+              && entry.title.trim().toLocaleLowerCase() === normalizedTitle);
+            if (duplicate) {
+              if (duplicate.status === 'active' || duplicate.ownerId === actorId) {
+                return { duplicated: true, id: duplicate._id, status: duplicate.status };
+              }
+              throw new Error('BOARD_NAME_CONFLICT');
+            }
+            const status = ['admin', 'moderator'].includes(member.role) ? 'active' : 'pending';
+            const board = {
+              ...clone(boardInput), clubId: 'heiguang', ownerId: actorId,
+              status, version: 1,
+            };
+            store.set('hg_boards', [...rows('hg_boards'), board]);
+            return { duplicated: false, id: board._id, status };
+          }
+          if (name === 'hg_decide_board') {
+            const actorId = args.p_actor_id;
+            const member = rows('hg_memberships').find((entry) => entry.userId === actorId
+              && entry.clubId === 'heiguang' && entry.status === 'active'
+              && ['admin', 'moderator'].includes(entry.role));
+            if (!member) throw new Error('FORBIDDEN');
+            const input = args.p_input;
+            const board = rows('hg_boards').find((entry) => entry._id === input.id);
+            if (!board || board.clubId !== 'heiguang') throw new Error('BOARD_NOT_FOUND');
+            if (board.version !== input.expectedVersion || board.status !== 'pending') {
+              throw new Error('VERSION_CONFLICT');
+            }
+            if (input.decision === 'reject' && !input.reason.trim()) throw new Error('REASON_REQUIRED');
+            const status = input.decision === 'approve' ? 'active' : 'rejected';
+            Object.assign(board, {
+              status,
+              rejectReason: status === 'rejected' ? input.reason : '',
+              version: board.version + 1,
+            });
+            store.set('hg_audit_logs', [...rows('hg_audit_logs'), {
+              _id: `audit:${board._id}`, actorId, action: 'board.decide', targetType: 'board',
+              targetId: board._id, decision: input.decision, reason: input.reason,
+            }]);
+            return { ok: true, status, version: board.version };
+          }
+          if (name === 'hg_create_post') {
+            const post = clone(args.p_post);
+            if (post.boardId) {
+              const board = rows('hg_boards').find((entry) => entry._id === post.boardId);
+              const member = rows('hg_memberships').find((entry) => entry.userId === post.ownerId
+                && entry.clubId === post.clubId && entry.status === 'active');
+              if (post.visibility === 'private') throw new Error('PRIVATE_BOARD');
+              if (!board || board.status !== 'active' || !member) throw new Error('BOARD_NOT_AVAILABLE');
+            }
+            store.set('hg_posts', [...rows('hg_posts'), post]);
+            return { id: post._id, version: 1, state: post.visibility === 'private' ? 'private_saved' : 'pending' };
+          }
+          if (name === 'hg_resubmit_rejected_post') {
+            const post = rows('hg_posts').find((entry) => entry._id === args.p_post_id);
+            if (!post || post.ownerId !== args.p_actor_id || post.status !== 'rejected'
+              || post.version !== args.p_expected_version) throw new Error('VERSION_CONFLICT');
+            Object.assign(post, {
+              title: args.p_title, body: args.p_body, status: 'pending',
+              version: post.version + 1,
+            });
+            return { id: post._id, status: 'pending', version: post.version };
+          }
           if (name === 'hg_toggle_reaction') {
             const { p_actor_id: userId, p_post_id: postId, p_comment_id: commentId, p_next: next } = args;
             const membership = rows('hg_memberships').find((m) => m.userId === userId
@@ -226,8 +302,10 @@ export function createCommentMemoryDatabase(seed = {}) {
           }
           throw new Error(`Unsupported test RPC: ${name}`);
         },
+        RegExp({ regexp, options }) { return { $op: 'regex', value: regexp, options }; },
       };
     },
+    get paginationCalls() { return paginationCalls; },
     dump(table) { return clone(rows(table)); },
   };
   return db;

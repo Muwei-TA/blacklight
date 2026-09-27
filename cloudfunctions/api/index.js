@@ -13,6 +13,7 @@ const { createRouter } = require('./shared/router');
 const session = require('./domain/session');
 const posts = require('./domain/posts');
 const topics = require('./domain/topics');
+const boards = require('./domain/boards');
 const collections = require('./domain/collections');
 const notifications = require('./domain/notifications');
 const search = require('./domain/search');
@@ -56,6 +57,11 @@ const handlers = {
   'topics/follow': topics.toggleFollow,
   'me/topics': topics.myFollows,
 
+  // ── 板块（独立于话题）──
+  'boards/list': boards.list,
+  'boards/detail': boards.detail,
+  'boards/create': boards.create,
+
   // ── 文集 ──
   'collections/list': collections.list,
   'collections/detail': collections.detail,
@@ -83,6 +89,7 @@ const handlers = {
   'admin/content/decide': moderation.decideContent,
   'admin/comment/decide': moderation.decideComment,
   'admin/topic/decide': moderation.decideTopic,
+  'admin/board/decide': moderation.decideBoard,
   'admin/membership/decide': moderation.decideMembership,
   'admin/report/decide': moderation.decideReport,
   'admin/collection/decide': moderation.decideCollection,

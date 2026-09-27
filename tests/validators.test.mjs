@@ -42,6 +42,18 @@ test('仅自己内容不能关联话题', () => {
   );
 });
 
+test('仅自己内容不能关联板块，公开内容可同时带板块和话题', () => {
+  assert.throws(
+    () => v.validatePostInput({ kind: 'fragment', visibility: 'private', body: 'x', boardId: 'b1' }),
+    /不能关联板块/,
+  );
+  const out = v.validatePostInput({
+    kind: 'fragment', visibility: 'club', body: 'x', boardId: 'b1', topicId: 't1',
+  });
+  assert.equal(out.boardId, 'b1');
+  assert.equal(out.topicId, 't1');
+});
+
 test('仅自己内容强制关闭回应', () => {
   const out = v.validatePostInput({ kind: 'fragment', visibility: 'private', body: 'x', commentsEnabled: true });
   assert.equal(out.commentsEnabled, false);
@@ -139,4 +151,11 @@ test('话题名称超限被拒', () => {
     () => v.validateTopicInput({ title: 'a'.repeat(CONTENT_LIMITS.topicTitle + 1), description: '', category: 'life' }),
     /最多/,
   );
+});
+
+test('板块名称与说明服务端限制长度并裁剪首尾空白', () => {
+  assert.deepEqual(v.validateBoardInput({ title: ' 板块 ', description: ' 描述 ' }), {
+    title: '板块', description: '描述',
+  });
+  assert.throws(() => v.validateBoardInput({ title: 'b'.repeat(CONTENT_LIMITS.topicTitle + 1), description: '' }), /最多/);
 });
