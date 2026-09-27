@@ -49,7 +49,8 @@ cloudfunctions/
     package.json
     domain/
       session.js               会话、入社、资料、主页、导出、注销
-      posts.js                 ★ 纵向参考实现，新模块照此写
+      posts.js                 内容 action 的兼容聚合入口
+      posts/                  ★ 内容用例分职责模块，新模块照此分层
       topics.js
       collections.js
       notifications.js
@@ -99,6 +100,7 @@ npm run sync      # 每次改完 shared/ 都要跑；deploy.mjs 会自动先跑�
 |---|---|
 | `cloudfunctions/api/index.js` | `require('./shared/router')` |
 | `cloudfunctions/api/domain/posts.js` | `require('../shared/policies')` |
+| `cloudfunctions/api/domain/posts/*.js` | `require('../../shared/policies')`（仍在 api 云函数目录内） |
 | `cloudfunctions/worker/tasks/review.js` | `require('../shared/db')` |
 
 `npm run check` 会拦截 `require('../../shared/...')` 这类跨目录引用。
@@ -110,14 +112,15 @@ npm run sync      # 每次改完 shared/ 都要跑；deploy.mjs 会自动先跑�
 | `shared/policies.js` 不得引入 `wx-server-sdk` | 正则检测 require |
 | `shared/policies.js` 不得访问数据库 | 正则检测 `.collection(` / `coll(` |
 | `shared/db.js` 不得出现业务权限判断 | 正则检测 `isMember` / `visibility ===` |
-| `domain/*.js` 不得内联比较 `visibility` / `memberStatus` 字面量 | 逐行正则 |
-| `domain/*.js` 不得读 `payload.ownerId/userId/role/isMember/openid` | 逐行正则 |
+| `domain/**/*.js` 不得内联比较 `visibility` / `memberStatus` 字面量 | 递归逐行正则 |
+| `domain/**/*.js` 不得读 `payload.ownerId/userId/role/isMember/openid` | 递归逐行正则 |
 | `presenters.js` 不得 spread 整个数据库文档 | 正则检测 `...post` 等 |
 | 每个 action 都有对应的 domain 导出 | 解析路由表与 module.exports |
 | 云函数目录齐备、shared 引用路径正确 | 文件存在性 + 正则 |
 | `.json` 不得含 UTF-8 BOM | 字节检测 |
+| 相邻前端仓库的 transport action 必须在后端路由中存在 | 跨仓库 action 对照；独立检出时跳过 |
 
-## 2.5 用例编写规范（照 `domain/posts.js` 写）
+## 2.5 用例编写规范（照 `domain/posts/` 写）
 
 固定顺序，不得跳步：
 
@@ -154,7 +157,7 @@ const visible = all.data.filter(p => policies.canReadPost(viewer, p));
 
 ### 避免 N+1
 
-`domain/posts.js` 的 `hydrateCards()` 是参考实现：一次性批量取
+`domain/posts/feed.js` 的 `hydrateCards()` 是参考实现：一次性批量取
 users / assets / topics / 我的互动标记 / 匿名别名，再在内存里拼装。
 
 ## 2.6 错误处理

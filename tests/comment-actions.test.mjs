@@ -1,17 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
-import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
+const Module = require('node:module');
 const constants = require('../shared/constants.js');
 const policies = require('../shared/policies.js');
 const validators = require('../shared/validators.js');
 const errors = require('../shared/errors.js');
 const presenters = require('../shared/presenters.js');
 const anonymity = require('../shared/anonymity.js');
-const source = readFileSync(new URL('../cloudfunctions/api/domain/posts.js', import.meta.url), 'utf8');
 const stamp = (n) => new Date(Date.UTC(2026, 8, 24, 0, 0, n)).toISOString();
 const memberViewer = (userId) => policies.buildViewer({
   userId, role: constants.ROLE.MEMBER, memberStatus: constants.MEMBER_STATUS.ACTIVE,
@@ -144,15 +142,33 @@ function harness() {
       } };
     },
   };
-  const module = { exports: {} };
   const stubs = {
-    '../shared/constants': constants, '../shared/policies': policies, '../shared/validators': validators,
-    '../shared/presenters': presenters, '../shared/errors': errors, '../shared/db': fakeDb,
-    '../shared/anonymity': anonymity, './foreground-review': { runOwnedReview: async () => null },
-    './assets': { signReadableAssets: async () => [] },
+    '../../shared/constants': constants, '../../shared/policies': policies, '../../shared/validators': validators,
+    '../../shared/presenters': presenters, '../../shared/errors': errors, '../../shared/db': fakeDb,
+    '../../shared/anonymity': anonymity, '../foreground-review': { runOwnedReview: async () => null },
+    '../assets': { signReadableAssets: async () => [] },
   };
-  vm.runInNewContext(source, { module, process, require: (id) => stubs[id] || require(id) });
-  return { posts: module.exports, store, fakeDb, rpcCalls, rows };
+  const modulePaths = [
+    '../cloudfunctions/api/domain/posts.js',
+    '../cloudfunctions/api/domain/posts/feed.js',
+    '../cloudfunctions/api/domain/posts/content.js',
+    '../cloudfunctions/api/domain/posts/reactions.js',
+    '../cloudfunctions/api/domain/posts/comments.js',
+    '../cloudfunctions/api/domain/posts/my-contents.js',
+    '../cloudfunctions/api/domain/posts/reports.js',
+  ].map((id) => require.resolve(id));
+  const originalLoad = Module._load;
+  try {
+    modulePaths.forEach((id) => { delete require.cache[id]; });
+    Module._load = function patchedLoad(request, parent, isMain) {
+      return Object.hasOwn(stubs, request) ? stubs[request] : originalLoad.call(this, request, parent, isMain);
+    };
+    const posts = require('../cloudfunctions/api/domain/posts.js');
+    return { posts, store, fakeDb, rpcCalls, rows };
+  } finally {
+    Module._load = originalLoad;
+    modulePaths.forEach((id) => { delete require.cache[id]; });
+  }
 }
 
 test('listComments returns reaction/viewer flags and only the authors own pending comments', async () => {

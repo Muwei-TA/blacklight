@@ -42,7 +42,7 @@
 | 数据访问（游标/幂等/审计） | `shared/db.js` | ✅ |
 | 会话与成员资格 | `shared/session.js` | ✅ 实时查询，不缓存 |
 | 云函数路由 | `shared/router.js` | ✅ 统一错误 + 日志脱敏 |
-| 内容用例（纵向参考） | `cloudfunctions/api/domain/posts.js` | ✅ 发布/详情/互动/范围/删除 |
+| 内容用例（纵向参考） | `cloudfunctions/api/domain/posts/`；`posts.js` 为兼容聚合入口 | ✅ 信息流/写入/评论/互动/我的内容/举报分模块 |
 | 话题 / 文集 / 通知 / 搜索 / 媒体 / 管理台 | `cloudfunctions/api/domain/*.js` | ✅ 主流程 |
 | 后台任务 | `cloudfunctions/worker/tasks/*.js` | ✅ 审核/图片/聚合/清理 |
 | 审核回调 | `cloudfunctions/review-callback/` | ✅ 验签/去重/防旧覆盖新 |

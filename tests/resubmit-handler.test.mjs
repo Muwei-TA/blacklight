@@ -38,7 +38,10 @@ Module._load = function patchedLoad(request, parent, isMain) {
     '../shared/anonymity': {},
     './foreground-review': { runOwnedReview: async () => null },
   };
-  return Object.hasOwn(stubs, request) ? stubs[request] : originalLoad.call(this, request, parent, isMain);
+  const stubKey = request.startsWith('../../shared/')
+    ? request.replace('../../shared/', '../shared/')
+    : request === '../foreground-review' ? './foreground-review' : request;
+  return Object.hasOwn(stubs, stubKey) ? stubs[stubKey] : originalLoad.call(this, request, parent, isMain);
 };
 const posts = require('../cloudfunctions/api/domain/posts.js');
 const viewer = policies.buildViewer({ userId: 'user-1', role: constants.ROLE.MEMBER, memberStatus: constants.MEMBER_STATUS.ACTIVE });

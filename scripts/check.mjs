@@ -97,10 +97,17 @@ if (/isMember|visibility\s*===|role\s*===/.test(dbSrc)) {
 
 // domain 层必须通过 policies 判权，不得内联比较 visibility
 const domainDir = join(ROOT, 'cloudfunctions/api/domain');
+function collectDomainFiles(dir, domainFiles) {
+  for (const name of readdirSync(dir)) {
+    const file = join(dir, name);
+    if (statSync(file).isDirectory()) collectDomainFiles(file, domainFiles);
+    else if (extname(file) === '.js') domainFiles.push(file);
+  }
+}
 if (existsSync(domainDir)) {
-  for (const name of readdirSync(domainDir)) {
-    const file = join(domainDir, name);
-    if (extname(file) !== '.js') continue;
+  const domainFiles = [];
+  collectDomainFiles(domainDir, domainFiles);
+  for (const file of domainFiles) {
     const src = readFileSync(file, 'utf8');
     const lines = src.split('\n');
 
@@ -207,9 +214,9 @@ console.log(`      functions: ${fns.join(', ')}`);
 
 // ---------- 6. 跨仓库契约一致性（可选） ----------
 console.log('[6/6] 前后端契约一致性');
-const feTransport = join(ROOT, '..', '前端', 'api', 'transport.js');
+const feTransport = join(ROOT, '..', 'tdesign-miniprogram-starter', 'api', 'transport.js');
 if (!existsSync(feTransport)) {
-  console.log('      跳过：未找到 ../前端/api/transport.js（独立运行本仓库时正常）');
+  console.log('      跳过：未找到相邻前端仓库的 api/transport.js（独立运行本仓库时正常）');
 } else {
   // transport 里的 action 字面量均为小写多段路径（pattern 以 / 开头故不会误匹配）
   const feSrc = readFileSync(feTransport, 'utf8');
