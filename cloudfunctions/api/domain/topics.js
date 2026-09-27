@@ -129,7 +129,7 @@ function duplicateTopicResult(topic, viewer) {
   if (!topic) return null;
   if (!policies.canReadTopic(viewer, topic)) {
     // Do not disclose another member's pending topic id or status.
-    throw errors.conflict('已有同名话题正在审核，请更换名称后再试');
+    throw errors.conflict('已有同名板块正在审核，请更换名称后再试');
   }
   return { duplicated: true, id: topic._id, status: topic.status };
 }
@@ -157,7 +157,7 @@ async function create(payload, ctx) {
     || readableMatches[0];
   if (duplicate) return duplicateTopicResult(duplicate, ctx.viewer);
   if (matchesForTitle.some((topic) => topic.status === TOPIC_STATUS.PENDING)) {
-    throw errors.conflict('已有同名话题正在审核，请更换名称后再试');
+    throw errors.conflict('已有同名板块正在审核，请更换名称后再试');
   }
 
   const id = topicIdForTitle(input.title);
