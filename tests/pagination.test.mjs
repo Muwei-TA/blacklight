@@ -16,11 +16,19 @@ test('cursor pagination retains an existing visibility OR and timestamp tie-brea
     const current = row[key];
     if (value && value.$op) {
       const expected = value.value instanceof Date ? value.value.toISOString() : value.value;
-      return value.$op === 'lt' ? current < expected : current > expected;
+      if (value.$op === 'lt') return current < expected;
+      if (value.$op === 'lte') return current <= expected;
+      if (value.$op === 'gte') return current >= expected;
+      return current > expected;
     }
     return current === (value instanceof Date ? value.toISOString() : value);
   });
-  const command = { lt: (value) => ({ $op: 'lt', value }), gt: (value) => ({ $op: 'gt', value }) };
+  const command = {
+    lt: (value) => ({ $op: 'lt', value }),
+    lte: (value) => ({ $op: 'lte', value }),
+    gt: (value) => ({ $op: 'gt', value }),
+    gte: (value) => ({ $op: 'gte', value }),
+  };
   const query = {
     where(value) { filter = value; return this; },
     orderBy() { return this; },
@@ -43,4 +51,13 @@ test('cursor pagination retains an existing visibility OR and timestamp tie-brea
   assert.deepEqual(Array.from(result.items, (row) => row._id), ['b']);
   assert.equal(result.hasMore, false);
   assert.equal(where.$or.length, 2);
+
+  const inclusiveResult = await module.exports.paginate('hg_posts', {}, {
+    cursor: { createdAt: Date.parse(rows[0].createdAt), id: 'b' },
+    pageSize: 1,
+    order: 'asc',
+    includeEqualId: true,
+  });
+  assert.deepEqual(Array.from(inclusiveResult.items, (row) => row._id), ['b']);
+  assert.equal(inclusiveResult.hasMore, true);
 });

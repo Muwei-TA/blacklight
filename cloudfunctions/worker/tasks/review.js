@@ -137,6 +137,13 @@ async function reviewPost(task) {
 
   if (assetRejected) return finishReview(task, post.version || 1, 'reject', '附件未通过内容检查');
 
+  // Articles are collaborative publications: complete every automated safety
+  // check first, then leave the version pending for an editor. Short posts are
+  // published automatically after the same safety checks above.
+  if (post.kind === 'article') {
+    return { status: REVIEW_TASK_STATUS.MANUAL, note: 'article awaiting editorial approval' };
+  }
+
   return finishReview(task, post.version || 1, 'approve');
 }
 

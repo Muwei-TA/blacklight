@@ -10,7 +10,7 @@ const rootValidators = require('../shared/validators.js');
 const rootErrors = require('../shared/errors.js');
 const rootPresenters = require('../shared/presenters.js');
 const calls = [];
-let moderationPosts = [{ _id: 'post-1', title: '文章', body: '正文', status: 'published', visibility: 'public', createdAt: '2026-09-23T00:00:00.000Z' }];
+let moderationPosts = [{ _id: 'post-1', clubId: 'heiguang', title: '文章', body: '正文', status: 'published', visibility: 'public', createdAt: '2026-09-23T00:00:00.000Z' }];
 let rpcError = null;
 const fakeDb = {
   command: () => ({ in: (value) => ({ $op: 'in', value }) }),
@@ -34,7 +34,7 @@ const fakeDb = {
     if (name === rootConstants.COLLECTIONS.reports) {
       return { items: [{ _id: 'report-1', targetType: 'post', targetId: 'post-1', reason: '理由', status: 'received', createdAt: '2026-09-23T00:00:00.000Z' }], hasMore: false };
     }
-    return { items: [{ _id: 'task-1', targetId: 'post-1', collectionId: 'collection-1', status: 'queued', createdAt: '2026-09-23T00:00:00.000Z' }], hasMore: false };
+    return { items: [{ _id: 'task-1', targetType: 'collection_submission', targetId: 'post-1', collectionId: 'collection-1', status: 'queued', createdAt: '2026-09-23T00:00:00.000Z' }], hasMore: false };
   },
   async findByIds() {
     return moderationPosts;
@@ -137,8 +137,8 @@ test('成员/举报/文集队列 DTO 为旧记录补 version=1', async () => {
 });
 
 test('文集队列不会把私密手记正文带到管理员 DTO', async () => {
-  moderationPosts = [{ _id: 'post-1', title: '私密', body: '私密正文', status: 'published', visibility: 'private' }];
+  moderationPosts = [{ _id: 'post-1', clubId: 'heiguang', title: '私密', body: '私密正文', status: 'published', visibility: 'private' }];
   const collection = await moderation.listQueue({ queue: 'collection' }, ctx(moderator));
   assert.deepEqual(collection.items, []);
-  moderationPosts = [{ _id: 'post-1', title: '文章', body: '正文', status: 'published', visibility: 'public', createdAt: '2026-09-23T00:00:00.000Z' }];
+  moderationPosts = [{ _id: 'post-1', clubId: 'heiguang', title: '文章', body: '正文', status: 'published', visibility: 'public', createdAt: '2026-09-23T00:00:00.000Z' }];
 });

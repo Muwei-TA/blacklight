@@ -128,6 +128,22 @@ test('安全检查通过后，post review 只调用 hg_finish_review 并传 leas
   assert.equal(task.leaseId, '');
 });
 
+test('文章通过自动安全检查后等待管理员，普通碎片仍由自动检查通过后发布', async () => {
+  reset();
+  posts['post-1'].kind = 'article';
+  const manual = await review.reviewPost(postTask());
+  assert.equal(manual.status, constants.REVIEW_TASK_STATUS.MANUAL);
+  assert.match(manual.note, /editorial approval/);
+  assert.equal(calls.filter((call) => call.name === 'hg_usage_reserve_review_call').length, 1);
+  assert.equal(calls.some((call) => call.name === 'hg_finish_review'), false);
+
+  reset();
+  const fragment = await review.reviewPost(postTask());
+  assert.equal(fragment.status, constants.REVIEW_TASK_STATUS.PASSED);
+  assert.equal(calls.at(-1).name, 'hg_finish_review');
+  assert.equal(calls.at(-1).args.p_decision, 'approve');
+});
+
 test('评论安全检查通过后走同一原子 RPC，使用评论版本', async () => {
   reset();
   const task = commentTask();

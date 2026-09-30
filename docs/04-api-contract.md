@@ -101,7 +101,7 @@
 | `posts/reaction` | `{ id, next: bool }` | `{ ok }` | `canInteract` |
 | `posts/bookmark` | `{ id, next: bool }` | `{ ok }` | `canInteract` |
 | `posts/comments/list` | `{ id }` | `{ items, nextCursor }` | `canReadPost` |
-| `posts/comments/create` | `{ id, body, replyToId?, identityMode, idempotencyKey }` | `{ id, state: 'pending' }` | `canComment` |
+| `posts/comments/create` | `{ id, body, replyToId?, identityMode, idempotencyKey }` | `{ id, state, version, comment }` | `canComment` |
 | `posts/comments/reaction` | `{ id, commentId, next: bool }` | `{ ok }` | `canInteract`；仅 `published` 回应 |
 | `posts/comments/delete` | `{ id, commentId, expectedVersion }` | `{ ok }` | 评论者本人（`canDeleteComment`） |
 | `me/contents` | `{ tab, cursor? }` | `{ items, nextCursor }` | 已登录 |
@@ -126,8 +126,9 @@
 }
 ```
 
-返回 `state`：`private_saved`（仅自己，直接保存）或 `pending`（进入审核）。
-**绝不返回表示"已公开"的状态** —— 那要等审核通过。
+返回 `state` 是 `private_saved`、`pending`、`published` 或 `rejected`。公开范围内容先经过微信内容安全自动检查：检查通过的碎片/活动自动发布；文章检查通过后保持 `pending`，等待管理员审核；存疑内容和安全检查连续失败的项目保持 `pending` 并转人工复核。只有检查中的项目不会提前返回 `published`。
+
+普通回应也先经过微信内容安全检查；通过后自动发布，不等待管理员逐条处理。存疑或连续检查失败的回应保持 `pending` 并进入人工复核。安全自动检查仍适用于普通帖子与回应。
 
 **回应（评论）DTO 与删除语义**（posts/comments/list 返回的每条评论/回复）：
 
@@ -245,7 +246,7 @@
 
 | action | payload | 返回 |
 |---|---|---|
-| `admin/queue` | `{ queue: 'content'|'topic'|'board'|..., cursor? }` | `{ items, nextCursor }` |
+| `admin/queue` | `{ queue: 'all'|'content'|'comment'|'topic'|'board'|'member'|'report'|'collection'|'appeals', cursor?, pageSize? }` | `{ items, nextCursor }` |
 | `admin/content/decide` | `{ id, decision, reason, expectedVersion }` | `{ ok, status }` |
 | `admin/topic/decide` | `{ id, decision, reason? }` | `{ ok, status }` |
 | `admin/board/decide` | `{ id, decision: 'approve'|'reject', expectedVersion, reason? }` | `{ ok, status, version }` |
@@ -254,6 +255,8 @@
 | `admin/collection/decide` | `{ id, decision, reason? }` | `{ ok }` |
 | `admin/anonymous/reveal` | `{ threadId, reason }` | `{ threadId, mappings }` |
 | `admin/usage/status` | — | `UsageStatusDTO` | moderator/admin |
+
+`queue: 'all'` 将全部当前可处理的人工待办按提交时间、源记录 ID 与队列名升序合并，统一返回 `{ items, nextCursor }`。客户端原样回传 `nextCursor`，不要按队列拆分或自行构造游标。项目类型包括内容安全人工复核/文章审批、回应安全人工复核、话题、板块、入社与移除成员恢复、举报、文集收录、内容申诉。普通帖子和回应的自动安全检查排队中或运行中时不进入管理员审批列表。
 
 `UsageStatusDTO` 提供 UTC 当日社团聚合用量，不包含个人用量或身份：
 

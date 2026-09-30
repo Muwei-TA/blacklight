@@ -48,7 +48,12 @@ function serverDate() {
  * @param {object} where 过滤条件（已含权限相关的 visibility/status 条件）
  * @param {object} options { cursor, pageSize, order }
  */
-async function paginate(name, where = {}, { cursor = null, pageSize = 20, order = 'desc' } = {}) {
+async function paginate(name, where = {}, {
+  cursor = null,
+  pageSize = 20,
+  order = 'desc',
+  includeEqualId = false,
+} = {}) {
   const _ = command();
   let query = { ...where };
 
@@ -59,7 +64,9 @@ async function paginate(name, where = {}, { cursor = null, pageSize = 20, order 
       { createdAt: order === 'desc' ? _.lt(cursorDate) : _.gt(cursorDate) },
       {
         createdAt: cursorDate,
-        _id: order === 'desc' ? _.lt(cursor.id) : _.gt(cursor.id),
+        _id: order === 'desc'
+          ? (includeEqualId ? _.lte(cursor.id) : _.lt(cursor.id))
+          : (includeEqualId ? _.gte(cursor.id) : _.gt(cursor.id)),
       },
     ] };
     query = { $and: [where, afterCursor] };

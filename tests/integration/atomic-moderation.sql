@@ -58,7 +58,9 @@ BEGIN
   );
   INSERT INTO public.hg_review_tasks (id, doc) VALUES
     (task_id, jsonb_build_object('_id', task_id, 'targetType', 'collection_submission', 'targetId', collection_post_id, 'collectionId', collection_id, 'status', 'queued', 'version', 1, 'createdAt', '2026-09-23T00:00:00.000Z')),
-    (disabled_task_id, jsonb_build_object('_id', disabled_task_id, 'targetType', 'collection_submission', 'targetId', collection_post_id, 'collectionId', collection_id, 'status', 'queued', 'version', 1, 'createdAt', '2026-09-23T00:00:00.000Z'));
+    (disabled_task_id, jsonb_build_object('_id', disabled_task_id, 'targetType', 'collection_submission', 'targetId', collection_post_id, 'collectionId', collection_id, 'status', 'queued', 'version', 1, 'createdAt', '2026-09-23T00:00:00.000Z')),
+    ('review:' || post_id, jsonb_build_object('_id', 'review:' || post_id, 'targetType', 'post', 'targetId', post_id, 'postVersion', 1, 'status', 'manual', 'version', 1, 'createdAt', '2026-09-23T00:00:00.000Z')),
+    ('comment-review:' || comment_id, jsonb_build_object('_id', 'comment-review:' || comment_id, 'targetType', 'comment', 'targetId', comment_id, 'postVersion', 1, 'status', 'manual', 'version', 1, 'createdAt', '2026-09-23T00:00:00.000Z'));
 
   -- Keep the fixture self-contained while restoring the real row on ROLLBACK.
   INSERT INTO public.hg_club_config (id, doc)
