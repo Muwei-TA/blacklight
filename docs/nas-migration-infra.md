@@ -81,14 +81,14 @@ NAS_BACKUP_ROOT=/vol2/backups/blacklight-nas-stage
 NAS_COMPOSE_PROJECT_NAME=blacklight-nas-stage
 NAS_NETWORK_PREFIX=blacklight-nas-stage
 NAS_PG_IMAGE=blacklight-nas-stage-postgres:16
-NAS_APP_IMAGE=blacklight-nas-stage-api:local
+NAS_APP_IMAGE=blacklight-nas-stage-api:20261002-002b333
 NAS_LAN_MODE=1
 API_BIND_IP=192.168.50.28
-API_BIND_PORT=18089
-PUBLIC_API_BASE_URL=http://192.168.50.28:18089
+API_BIND_PORT=18118
+PUBLIC_API_BASE_URL=http://192.168.50.28:18118
 ```
 
-将配置保存到 stage 数据根的 `.env`，另在该根下准备独立 `secrets/`。新栈使用自己的 Compose 项目名、网络前缀和镜像 tag，旧栈保持运行并作为回退点。LAN HTTP 只用于隔离的内网验收；代码会拒绝其它明文地址或端口不匹配的 URL。
+将配置保存到 stage 数据根的 `.env`，另在该根下准备独立 `secrets/`。上述 `18118` 是本次在 NAS 上确认空闲并实际使用的端口；`18089` 已被其他容器占用，复用示例前仍须检查端口。新栈使用自己的 Compose 项目名、网络前缀和镜像 tag，旧栈保持运行并作为回退点。LAN HTTP 只用于隔离的内网验收；代码会拒绝其它明文地址或端口不匹配的 URL。
 
 ```sh
 docker compose --project-name blacklight-nas-stage \
