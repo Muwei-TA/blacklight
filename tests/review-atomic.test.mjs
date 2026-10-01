@@ -16,17 +16,11 @@ let usageAllowed = true;
 let securityCalls = 0;
 let quotaNextAttemptAt = '2026-09-24T00:00:00.000Z';
 
-const fakeCloud = {
-  openapi({ appid }) {
-    assert.equal(appid, 'review-test-app');
-    return {
-      security: {
-        async msgSecCheck() {
-          securityCalls += 1;
-          return { result: { suggest: securitySuggest } };
-        },
-      },
-    };
+const fakeWechat = {
+  async msgSecCheck({ openid }) {
+    assert.ok(openid.startsWith('openid-'));
+    securityCalls += 1;
+    return { result: { suggest: securitySuggest } };
   },
 };
 const fakeDb = {
@@ -57,7 +51,7 @@ const fakeDb = {
 const originalLoad = Module._load;
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './db' && parent?.filename?.replace(/\\/g, '/').endsWith('/shared/usage.js')) return fakeDb;
-  if (request === 'wx-server-sdk') return fakeCloud;
+  if (request.endsWith('/shared/wechat-api')) return fakeWechat;
   if (request.endsWith('/shared/constants')) return constants;
   if (request.endsWith('/shared/db')) return fakeDb;
   return originalLoad.call(this, request, parent, isMain);

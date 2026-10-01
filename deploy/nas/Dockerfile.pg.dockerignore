@@ -1,0 +1,13 @@
+**
+!cloudbase/
+!cloudbase/migrations/
+!cloudbase/migrations/*.sql
+!deploy/
+!deploy/nas/
+!deploy/nas/compat/
+!deploy/nas/compat/*.sql
+!deploy/nas/entrypoint-pg-init.sh
+!deploy/nas/healthcheck-pg.sh
+!scripts/
+!scripts/local-apply-migrations.sh
+!scripts/local-backup.sh

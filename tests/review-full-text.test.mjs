@@ -8,11 +8,11 @@ function loader(check) {
   const output = { exports: {} };
   const meter = { calls: 0 };
   const usage = { async reserveReviewCall(kind) { assert.equal(kind, 'text'); meter.calls += 1; } };
-  const cloud = { openapi: () => ({ security: { msgSecCheck: check } }) };
+  const wechat = { msgSecCheck: check };
   vm.runInNewContext(readFileSync(new URL('../cloudfunctions/worker/tasks/review.js', import.meta.url), 'utf8'), {
-    require: (name) => name === 'wx-server-sdk' ? cloud
-      : name.endsWith('/constants') ? require('../shared/constants')
-        : name.endsWith('/shared/usage') ? usage : {},
+    require: (name) => name.endsWith('/constants') ? require('../shared/constants')
+      : name.endsWith('/shared/usage') ? usage
+        : name.endsWith('/shared/wechat-api') ? wechat : {},
     module: output, process: { env: { MINIPROGRAM_APP_ID: 'test-app' } }, Buffer,
   });
   return { ...output.exports, meter };

@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/.env
+**/.env.*
+**/secrets/**
+**/backups/**
+tests/**
+docs/**
+cloudbase/**
+cloudfunctions/review-callback/**
+deploy/nas/secrets/**
+deploy/nas/backups/**

@@ -3,14 +3,15 @@
  * ⚠️ 不允许在本文件出现业务权限判断 —— 那是 policies.js 的职责。
  */
 
-const cloud = require('wx-server-sdk');
 const { COLLECTIONS } = require('./constants');
 const { conflict } = require('./errors');
 
 let initialized = false;
+let cloud;
 
 function getCloud() {
   if (!initialized) {
+    cloud = require('wx-server-sdk');
     cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
     initialized = true;
   }
@@ -19,8 +20,11 @@ function getCloud() {
 
 let storage;
 function getStorage() {
-  if (!process.env.CLOUDBASE_APIKEY) throw new Error('Server storage credential unavailable');
-  if (!storage) storage = require('./pg-storage').createPgStorageAdapter();
+  if (!storage) {
+    storage = process.env.RUNTIME_KIND === 'nas'
+      ? require('./local-storage').createLocalStorageAdapter()
+      : require('./pg-storage').createPgStorageAdapter();
+  }
   return storage;
 }
 

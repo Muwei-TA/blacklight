@@ -220,14 +220,19 @@ async function runTask(task) {
 
 exports.main = async (event = {}, context = {}) => {
   let cloud;
-  try {
-    cloud = db.getCloud();
-  } catch (err) {
-    console.error('[worker] cloud init failed', err.message);
-    return { code: 'server', data: { claimed: 0, done: 0, failed: 1, manual: 0 } };
+  let source;
+  if (process.env.RUNTIME_KIND === 'nas' && context.localRuntime === true) {
+    source = { ok: true, source: 'nas-local', hasOpenId: false };
+  } else {
+    try {
+      cloud = db.getCloud();
+    } catch (err) {
+      console.error('[worker] cloud init failed', { code: err.code || 'cloud_init_error' });
+      return { code: 'server', data: { claimed: 0, done: 0, failed: 1, manual: 0 } };
+    }
+    source = verifyWorkerSource(cloud, event, process.env, context);
   }
 
-  const source = verifyWorkerSource(cloud, event, process.env, context);
   if (!source.ok) {
     // Type/TriggerName are logged for diagnosis only. They are ordinary event
     // fields and must never be used as proof that this was a timer invocation.
