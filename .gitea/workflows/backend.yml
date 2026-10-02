@@ -62,7 +62,7 @@ jobs:
           NAS_APP_DATABASE_PASSWORD_FILE="$password_file" \
           bash scripts/local-apply-migrations.sh
       - name: PostgreSQL integration tests
-        run: node --test --test-concurrency=1 tests/integration/comment-reaction-pg.test.mjs tests/integration/user-levels-pg.test.mjs
+        run: node --test --test-concurrency=1 tests/integration/comment-reaction-pg.test.mjs tests/integration/user-levels-pg.test.mjs tests/integration/multi-club-tenancy-pg.test.mjs tests/integration/usage-quotas-pg.test.mjs tests/integration/paused-club-cleanup-pg.test.mjs tests/integration/platform-developer-pg.test.mjs
         env:
           PG_TEST_URL: postgresql://postgres:postgres@postgres:5432/blacklight_test
           HG_TEST_DATABASE_RESET: 'yes'

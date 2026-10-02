@@ -148,6 +148,20 @@ wait_for_app() {
 }
 
 wait_for_db || fail 'PostgreSQL did not become healthy; database data was preserved'
+compose stop api worker
+export NAS_WRITES_QUIESCED=1
+if ! compose --profile maintenance run --rm --no-deps backup; then
+  compose start api worker || true
+  fail 'pre-migration backup/restore verification failed; existing schema was preserved'
+fi
+db_container=$(compose ps --all --quiet db)
+docker cp "$REPOSITORY_ROOT/cloudbase/migrations/." "$db_container:/opt/blacklight/cloudbase-migrations/"
+docker cp "$REPOSITORY_ROOT/scripts/local-apply-migrations.sh" "$db_container:/usr/local/bin/local-apply-migrations"
+docker cp "$REPOSITORY_ROOT/deploy/nas/healthcheck-pg.sh" "$db_container:/usr/local/bin/healthcheck-pg"
+docker cp "$REPOSITORY_ROOT/scripts/local-backup.sh" "$db_container:/usr/local/bin/local-backup"
+docker exec "$db_container" bash /usr/local/bin/local-apply-migrations
+wait_for_db || fail 'migrated PostgreSQL did not become healthy; use the pre-migration backup'
+docker build --tag "$NAS_PG_IMAGE" --file /workspace/deploy/nas/Dockerfile.pg "$REPOSITORY_ROOT"
 if [[ ! -f "$DB_INITIALIZED_MARKER" ]]; then
   printf '%s\n' "$NAS_COMPOSE_PROJECT_NAME" > "$DB_INITIALIZED_MARKER"
   chmod 0600 "$DB_INITIALIZED_MARKER"
