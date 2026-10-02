@@ -295,7 +295,10 @@ async function exportMedia(envId, objectIds, outDir) {
       await ensurePrivateDirectory(dirname(target));
       await runTcb([
         'storage', 'objects', 'download', objectKey, target,
-        '-e', envId, '-b', BUCKET_ID, '--json',
+        // In CloudBase CLI 3.8.4, --json reports status and discards the body
+        // even when a local path is supplied.  File downloads require GET
+        // without --json; stdout/stderr remain suppressed by runTcb.
+        '-e', envId, '-b', BUCKET_ID,
       ], { failureCode: 'MEDIA_DOWNLOAD_FAILED' });
 
       const details = await lstat(target).catch(() => null);
