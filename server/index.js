@@ -194,7 +194,10 @@ function createServer() {
         res.setHeader('content-length', item.content.length);
         res.setHeader('cache-control', 'private, no-store');
         res.setHeader('x-content-type-options', 'nosniff');
-        res.setHeader('cross-origin-resource-policy', 'same-site');
+        // WeChat renders signed HTTPS images inside a separate WebView origin.
+        // The short-lived signature and server-side permission check guard
+        // access; same-site CORP would prevent that WebView from displaying it.
+        res.setHeader('cross-origin-resource-policy', 'cross-origin');
         res.end(item.content);
       } catch (error) {
         console.error('[http] media request failed', { requestId, code: error.code || 'media_error' });
