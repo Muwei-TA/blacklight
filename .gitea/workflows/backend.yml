@@ -1,0 +1,117 @@
+name: Backend CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: blacklight_test
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci
+      - name: Sync shared files
+        run: npm run sync
+      - name: Static and architecture checks
+        run: npm run check
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Install PostgreSQL client
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends postgresql-client
+          psql --version
+      - name: Initialize isolated PostgreSQL schema
+        shell: bash
+        env:
+          PGHOST: postgres
+          PGPORT: '5432'
+          PGPASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: blacklight_test
+        run: |
+          set -euo pipefail
+          password_file=$(mktemp)
+          trap 'rm -f "$password_file"' EXIT
+          printf '%s' 'ci-only-app-password' > "$password_file"
+          chmod 600 "$password_file"
+          LOCAL_MIGRATIONS_DIR="$GITHUB_WORKSPACE/cloudbase/migrations" \
+          LOCAL_COMPAT_DIR="$GITHUB_WORKSPACE/deploy/nas/compat" \
+          NAS_APP_DATABASE_PASSWORD_FILE="$password_file" \
+          bash scripts/local-apply-migrations.sh
+      - name: PostgreSQL integration tests
+        run: node --test --test-concurrency=1 tests/integration/comment-reaction-pg.test.mjs tests/integration/user-levels-pg.test.mjs
+        env:
+          PG_TEST_URL: postgresql://postgres:postgres@postgres:5432/blacklight_test
+          HG_TEST_DATABASE_RESET: 'yes'
+
+  deploy:
+    name: deploy isolated NAS stack
+    needs: checks
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Docker client and run isolated deploy helper
+        env:
+          DEPLOY_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version --format '{{.Client.Version}}' >/dev/null
+          docker compose version >/dev/null
+          test -n "${GITHUB_WORKSPACE:-}" || {
+            echo 'GITHUB_WORKSPACE is required for the deployment checkout.' >&2
+            exit 1
+          }
+          case "$DEPLOY_COMMIT" in
+            *[!0-9a-f]*|'') echo 'Invalid deployment commit SHA.' >&2; exit 1 ;;
+          esac
+          test "${#DEPLOY_COMMIT}" -eq 40 || {
+            echo 'Expected a full 40-character commit SHA.' >&2
+            exit 1
+          }
+          helper_name="blacklight-nas-gitea-ci-deploy-${DEPLOY_COMMIT:0:12}-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$"
+          cleanup_helper() {
+            docker rm -f "$helper_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup_helper EXIT
+          docker create --name "$helper_name" --user 0:0 --workdir /workspace \
+            --mount 'type=bind,source=/vol1/docker/blacklight-nas-gitea-ci,target=/vol1/docker/blacklight-nas-gitea-ci' \
+            --mount 'type=bind,source=/vol2/backups/blacklight-nas-gitea-ci,target=/vol2/backups/blacklight-nas-gitea-ci' \
+            --mount 'type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock' \
+            --env DEPLOY_COMMIT \
+            docker.gitea.com/runner-images:ubuntu-latest \
+            bash /workspace/deploy/nas/deploy-gitea-ci.sh >/dev/null
+          tar --exclude=.git --exclude=node_modules -C "$GITHUB_WORKSPACE" -cf - . | docker cp - "$helper_name:/workspace"
+          docker start "$helper_name" >/dev/null
+          helper_exit_code=$(docker wait "$helper_name")
+          docker logs "$helper_name"
+          [[ "$helper_exit_code" =~ ^[0-9]+$ ]] || {
+            echo 'Could not read the deployment helper exit code.' >&2
+            exit 1
+          }
+          exit "$helper_exit_code"
