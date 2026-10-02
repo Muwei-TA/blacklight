@@ -58,7 +58,7 @@ jobs:
           # The historical RPC regression installs an old function; rebuild only this job's disposable schema.
           test "$POSTGRES_DB" = blacklight_test
           psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-            -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+            -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT USAGE ON SCHEMA public TO PUBLIC;'
           password_file=$(mktemp)
           trap 'rm -f "$password_file"' EXIT
           printf '%s' 'ci-only-app-password' > "$password_file"
