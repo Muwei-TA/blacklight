@@ -54,7 +54,7 @@ test('PostgreSQL serializes daily caps and rolls approval back during account de
   await run(`
     BEGIN;
     INSERT INTO public.hg_users (id, doc) VALUES
-      (${sqlValue(deleting)}, jsonb_build_object('_id', ${sqlValue(deleting)}, 'status', 'active'));
+      ${[actor, other, deleting, retryAuthor].map((userId) => `(${sqlValue(userId)}, jsonb_build_object('_id', ${sqlValue(userId)}, 'status', 'active'))`).join(',\n      ')};
     INSERT INTO public.hg_memberships (id, doc) VALUES
       (${sqlValue(`${actor}:heiguang`)}, jsonb_build_object('_id', ${sqlValue(`${actor}:heiguang`)}, 'userId', ${sqlValue(actor)}, 'clubId', 'heiguang', 'status', 'active', 'role', 'member')),
       (${sqlValue(`${other}:heiguang`)}, jsonb_build_object('_id', ${sqlValue(`${other}:heiguang`)}, 'userId', ${sqlValue(other)}, 'clubId', 'heiguang', 'status', 'active', 'role', 'member')),
@@ -65,15 +65,15 @@ test('PostgreSQL serializes daily caps and rolls approval back during account de
       (${sqlValue(deletionPost)}, jsonb_build_object('_id', ${sqlValue(deletionPost)}, 'ownerId', ${sqlValue(deleting)}, 'clubId', 'heiguang', 'visibility', 'club', 'status', 'published', 'commentCount', 0)),
       (${sqlValue(retryPost)}, jsonb_build_object('_id', ${sqlValue(retryPost)}, 'ownerId', ${sqlValue(other)}, 'clubId', 'heiguang', 'visibility', 'club', 'status', 'published', 'commentCount', 0));
     INSERT INTO public.hg_comments (id, doc) VALUES
-      ${comments.map((id, index) => `(${sqlValue(id)}, jsonb_build_object('_id', ${sqlValue(id)}, 'postId', ${sqlValue(commentPosts[index])}, 'ownerId', ${sqlValue(actor)}, 'status', 'pending', 'version', 1))`).join(',\n      ')},
-      (${sqlValue(deletionComment)}, jsonb_build_object('_id', ${sqlValue(deletionComment)}, 'postId', ${sqlValue(deletionPost)}, 'ownerId', ${sqlValue(deleting)}, 'status', 'pending', 'version', 1)),
-      (${sqlValue(retryComment)}, jsonb_build_object('_id', ${sqlValue(retryComment)}, 'postId', ${sqlValue(retryPost)}, 'ownerId', ${sqlValue(retryAuthor)}, 'status', 'pending', 'version', 1));
+      ${comments.map((id, index) => `(${sqlValue(id)}, jsonb_build_object('_id', ${sqlValue(id)}, 'clubId', 'heiguang', 'postId', ${sqlValue(commentPosts[index])}, 'ownerId', ${sqlValue(actor)}, 'status', 'pending', 'version', 1))`).join(',\n      ')},
+      (${sqlValue(deletionComment)}, jsonb_build_object('_id', ${sqlValue(deletionComment)}, 'clubId', 'heiguang', 'postId', ${sqlValue(deletionPost)}, 'ownerId', ${sqlValue(deleting)}, 'status', 'pending', 'version', 1)),
+      (${sqlValue(retryComment)}, jsonb_build_object('_id', ${sqlValue(retryComment)}, 'clubId', 'heiguang', 'postId', ${sqlValue(retryPost)}, 'ownerId', ${sqlValue(retryAuthor)}, 'status', 'pending', 'version', 1));
     INSERT INTO public.hg_review_tasks (id, doc) VALUES
-      (${sqlValue(deletionTask)}, jsonb_build_object('_id', ${sqlValue(deletionTask)}, 'targetType', 'comment',
+      (${sqlValue(deletionTask)}, jsonb_build_object('_id', ${sqlValue(deletionTask)}, 'clubId', 'heiguang', 'targetType', 'comment',
         'targetId', ${sqlValue(deletionComment)}, 'postVersion', 1, 'status', 'running', 'attempts', 0,
         'leaseId', ${sqlValue(deletionLease)}, 'leaseExpiresAt', (transaction_timestamp() + interval '5 minutes')::text,
         'createdAt', transaction_timestamp()::text)),
-      (${sqlValue(retryTask)}, jsonb_build_object('_id', ${sqlValue(retryTask)}, 'targetType', 'comment',
+      (${sqlValue(retryTask)}, jsonb_build_object('_id', ${sqlValue(retryTask)}, 'clubId', 'heiguang', 'targetType', 'comment',
         'targetId', ${sqlValue(retryComment)}, 'postVersion', 1, 'status', 'running', 'attempts', 0,
         'leaseId', ${sqlValue(retryLease)}, 'leaseExpiresAt', (transaction_timestamp() + interval '5 minutes')::text,
         'createdAt', transaction_timestamp()::text));
@@ -111,7 +111,7 @@ test('PostgreSQL serializes daily caps and rolls approval back during account de
       SELECT id FROM public.hg_comments WHERE id=${sqlValue(deletionComment)} FOR UPDATE;
       SELECT id FROM public.hg_posts WHERE id=${sqlValue(deletionPost)} FOR UPDATE;
       SELECT pg_sleep(1.2);
-      SELECT public.hg_finish_review(${sqlValue(deletionTask)}, ${sqlValue(deletionLease)}, 1, 'approve', '');
+      SELECT public.hg_finish_review(${sqlValue(deletionTask)}, ${sqlValue(deletionLease)}, 1, 'approve', '', 'heiguang');
       COMMIT;`;
     const reviewPromise = run(reviewSql, reviewName).then(
       (result) => ({ result, error: null }),
@@ -155,14 +155,14 @@ test('PostgreSQL serializes daily caps and rolls approval back during account de
       'temporary membership update to hold its row lock',
     );
     await assert.rejects(
-      run(`SELECT public.hg_finish_review(${sqlValue(retryTask)}, ${sqlValue(retryLease)}, 1, 'approve', '')`, retryReviewName),
+      run(`SELECT public.hg_finish_review(${sqlValue(retryTask)}, ${sqlValue(retryLease)}, 1, 'approve', '', 'heiguang')`, retryReviewName),
       (error) => /XP_MEMBERSHIP_BUSY/.test(`${error.stderr || ''}\n${error.stdout || ''}`),
     );
     await memberUpdate;
     assert.equal((await run(`SELECT doc->>'status' FROM public.hg_comments WHERE id=${sqlValue(retryComment)}`)).stdout.trim(), 'pending');
     assert.equal((await run(`SELECT doc->>'status' FROM public.hg_review_tasks WHERE id=${sqlValue(retryTask)}`)).stdout.trim(), 'running');
     assert.equal((await run(`SELECT count(*) FROM public.hg_user_xp_events WHERE user_id=${sqlValue(retryAuthor)}`)).stdout.trim(), '0');
-    assert.equal((await run(`SELECT public.hg_finish_review(${sqlValue(retryTask)}, ${sqlValue(retryLease)}, 1, 'approve', '')->>'targetStatus'`)).stdout.trim(), 'published');
+    assert.equal((await run(`SELECT public.hg_finish_review(${sqlValue(retryTask)}, ${sqlValue(retryLease)}, 1, 'approve', '', 'heiguang')->>'targetStatus'`)).stdout.trim(), 'published');
     assert.equal((await run(`SELECT total_xp FROM public.hg_user_xp_accounts WHERE user_id=${sqlValue(retryAuthor)}`)).stdout.trim(), '3');
   } finally {
     await run(`
@@ -173,7 +173,7 @@ test('PostgreSQL serializes daily caps and rolls approval back during account de
       DELETE FROM public.hg_comments WHERE id LIKE ${sqlValue(`${prefix}-%`)};
       DELETE FROM public.hg_posts WHERE id LIKE ${sqlValue(`${prefix}-%`)};
       DELETE FROM public.hg_memberships WHERE doc->>'userId' IN (${sqlValue(actor)}, ${sqlValue(other)}, ${sqlValue(deleting)}, ${sqlValue(retryAuthor)});
-      DELETE FROM public.hg_users WHERE id=${sqlValue(deleting)};
+      DELETE FROM public.hg_users WHERE id IN (${sqlValue(actor)}, ${sqlValue(other)}, ${sqlValue(deleting)}, ${sqlValue(retryAuthor)});
     `).catch(() => {});
   }
 });

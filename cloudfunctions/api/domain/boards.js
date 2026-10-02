@@ -1,7 +1,7 @@
 /** 板块领域用例。板块是帖子分流对象，与话题分开存储、授权和展示。 */
 
 const { randomUUID } = require('node:crypto');
-const { COLLECTIONS, BOARD_STATUS, DEFAULT_CLUB_ID } = require('../shared/constants');
+const { COLLECTIONS, BOARD_STATUS } = require('../shared/constants');
 const policies = require('../shared/policies');
 const validators = require('../shared/validators');
 const presenters = require('../shared/presenters');
@@ -28,6 +28,7 @@ function presentBoard(board, now) {
 
 /** GET /boards —— 有效成员只看已通过的板块。 */
 async function list(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   const cursor = validators.parseCursor(payload.cursor);
   const pageSize = validators.clampPageSize(payload.pageSize);
   const status = payload.status === undefined || payload.status === null || payload.status === ''
@@ -38,7 +39,7 @@ async function list(payload, ctx) {
     : validators.validateSearchQuery(payload.q);
   if (!ctx.viewer.isMember) return { items: [], nextCursor: null };
 
-  const where = { clubId: DEFAULT_CLUB_ID, status };
+  const where = { clubId, status };
   if (q) {
     where.title = db.getDb().RegExp({
       regexp: require('./search').escapeRegex(q),
@@ -48,7 +49,7 @@ async function list(payload, ctx) {
   const { items, hasMore } = await db.paginate(
     COLLECTIONS.boards,
     where,
-    { cursor, pageSize },
+    { cursor, pageSize, clubId },
   );
   return {
     items: items.map((board) => presentBoard(board, ctx.now)),
@@ -58,9 +59,10 @@ async function list(payload, ctx) {
 
 /** GET /boards/{id} —— 非 active 板块只允许提交者与管理员查看。 */
 async function detail(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   const id = validators.requireId(payload.id, 'id');
-  const board = await db.findOneById(COLLECTIONS.boards, id);
-  if (!policies.canReadBoard(ctx.viewer, board) || board.clubId !== DEFAULT_CLUB_ID) {
+  const board = await db.findOneById(COLLECTIONS.boards, id, clubId);
+  if (!policies.canReadBoard(ctx.viewer, board)) {
     throw errors.notAccessible({ boardId: id });
   }
 
@@ -74,6 +76,7 @@ async function detail(payload, ctx) {
       {
         cursor: validators.parseCursor(payload.cursor),
         pageSize: validators.clampPageSize(payload.pageSize),
+        clubId,
       },
     );
     items = await posts.hydrateCards(page.items, ctx);
@@ -92,6 +95,7 @@ async function detail(payload, ctx) {
 
 /** POST /boards —— 管理员创建后直接 active，普通成员的申请进入 pending。 */
 async function create(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
   if (!policies.canCreatePost(ctx.viewer)) throw errors.forbidden({ reason: 'member cannot create board' });
   const input = validators.validateBoardInput(payload);
@@ -108,6 +112,7 @@ async function create(payload, ctx) {
     return await db.getDb().rpc('hg_create_board', {
       p_actor_id: ctx.viewer.userId,
       p_board: board,
+      p_club_id: clubId,
     });
   } catch (error) {
     const marker = `${error && error.code ? error.code : ''} ${error && error.message ? error.message : ''}`;

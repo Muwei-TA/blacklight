@@ -23,7 +23,7 @@ test('long text checks tail beyond 2500 and preserves boundary overlap', async (
     segments.push(content);
     return { result: { suggest: content.includes('RISK_AT_TAIL') ? 'risky' : 'pass' } };
   });
-  const result = await checkText('光'.repeat(6000) + 'RISK_AT_TAIL', 'test-user');
+  const result = await checkText('光'.repeat(6000) + 'RISK_AT_TAIL', 'test-user', 'heiguang');
   assert.equal(result.pass, false);
   assert.equal(segments.length, 3);
   assert.equal(meter.calls, 3, 'each text chunk reserves one review call');
@@ -31,6 +31,6 @@ test('long text checks tail beyond 2500 and preserves boundary overlap', async (
 });
 test('text service outage cannot pass or be reported as ordinary clean content', async () => {
   const { checkText, meter } = loader(async () => { throw { errCode: -1, message: 'private content must not be logged' }; });
-  await assert.rejects(checkText('正常文字', 'test-user'), { message: 'msgSecCheck failed: -1' });
+  await assert.rejects(checkText('正常文字', 'test-user', 'heiguang'), { message: 'msgSecCheck failed: -1' });
   assert.equal(meter.calls, 1, 'failed external attempts still consume quota');
 });

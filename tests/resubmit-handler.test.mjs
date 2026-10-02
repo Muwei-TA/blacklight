@@ -44,13 +44,13 @@ Module._load = function patchedLoad(request, parent, isMain) {
   return Object.hasOwn(stubs, stubKey) ? stubs[stubKey] : originalLoad.call(this, request, parent, isMain);
 };
 const posts = require('../cloudfunctions/api/domain/posts.js');
-const viewer = policies.buildViewer({ userId: 'user-1', role: constants.ROLE.MEMBER, memberStatus: constants.MEMBER_STATUS.ACTIVE });
+const viewer = policies.buildViewer({ userId: 'user-1', clubId: constants.DEFAULT_CLUB_ID, role: constants.ROLE.MEMBER, memberStatus: constants.MEMBER_STATUS.ACTIVE });
 const ctx = { viewer, capabilities: { publishing: true, publicScope: false } };
 
 test('wrong owner cannot resubmit or reach PG RPC', async () => {
   await assert.rejects(posts.resubmitRejectedPost({ id: 'post-1', expectedVersion: 2, title: 'new', body: 'new', idempotencyKey: 'retry' }, {
     ...ctx,
-    viewer: policies.buildViewer({ userId: 'other', role: constants.ROLE.MEMBER, memberStatus: constants.MEMBER_STATUS.ACTIVE }),
+    viewer: policies.buildViewer({ userId: 'other', clubId: constants.DEFAULT_CLUB_ID, role: constants.ROLE.MEMBER, memberStatus: constants.MEMBER_STATUS.ACTIVE }),
   }), (err) => err.kind === 'not_accessible');
   assert.equal(calls.length, 0);
 });

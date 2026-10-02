@@ -9,6 +9,7 @@ const { hydrateCards } = require('./feed');
 /** GET /me/contents —— 我的内容各状态列表 */
 async function listMyContents(payload, ctx) {
   if (!ctx.viewer.isAuthenticated) throw errors.unauthenticated();
+  const clubId = ctx.viewer.clubId;
 
   const tab = validators.requireEnum(payload.tab || 'published', 'tab', [
     'published',
@@ -22,15 +23,18 @@ async function listMyContents(payload, ctx) {
 
   let where;
   if (tab === 'bookmark') {
+    // 成员退出后仅保留本人历史作品入口；收藏列表可能包含其他作者的内容。
+    if (!ctx.viewer.isMember) throw errors.membershipInvalid();
     // 收藏：先取收藏关系，再逐条复核权限 —— 失效项返回占位而非摘要
     const bookmarks = await db.paginate(
       COLLECTIONS.bookmarks,
-      { userId: ctx.viewer.userId },
-      { cursor, pageSize },
+      { clubId, userId: ctx.viewer.userId },
+      { cursor, pageSize, clubId },
     );
     const posts = await db.findByIds(
       COLLECTIONS.posts,
       bookmarks.items.map((b) => b.postId),
+      clubId,
     );
     const readable = posts.filter((p) => policies.canListPost(ctx.viewer, p));
     const cards = await hydrateCards(readable, ctx);
@@ -51,20 +55,22 @@ async function listMyContents(payload, ctx) {
 
   if (tab === 'published') {
     where = {
+      clubId,
       ownerId: ctx.viewer.userId,
       status: POST_STATUS.PUBLISHED,
       visibility: _.in([VISIBILITY.PUBLIC, VISIBILITY.CLUB]),
     };
   } else if (tab === 'pending') {
     where = {
+      clubId,
       ownerId: ctx.viewer.userId,
       status: _.in([POST_STATUS.PENDING, POST_STATUS.REJECTED, POST_STATUS.HIDDEN, POST_STATUS.UPLOADING]),
     };
   } else {
-    where = { ownerId: ctx.viewer.userId, visibility: VISIBILITY.PRIVATE, status: POST_STATUS.PUBLISHED };
+    where = { clubId, ownerId: ctx.viewer.userId, visibility: VISIBILITY.PRIVATE, status: POST_STATUS.PUBLISHED };
   }
 
-  const { items, hasMore } = await db.paginate(COLLECTIONS.posts, where, { cursor, pageSize });
+  const { items, hasMore } = await db.paginate(COLLECTIONS.posts, where, { cursor, pageSize, clubId });
   const ownItems = items.map((post) => post.status === POST_STATUS.HIDDEN
     ? { ...post, body: '', title: '已暂时隐藏的内容', assetIds: [] } : post);
   const cards = await hydrateCards(ownItems, ctx);

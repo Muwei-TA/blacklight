@@ -94,7 +94,7 @@ class ImageProcessingError extends Error {}
 test('upload storage failure records reservedFileId before upload and leaves no fake success', async () => {
   const events = [];
   const asset = {
-    _id: 'asset-1', ownerId: 'owner-1', mediaType: 'image', status: 'intent',
+    _id: 'asset-1', clubId: 'heiguang', ownerId: 'owner-1', mediaType: 'image', status: 'intent',
     declaredSize: 3, mimeType: 'image/jpeg', cloudPath: 'private/image/object.jpg',
   };
   const cloud = {
@@ -159,7 +159,7 @@ test('upload storage failure records reservedFileId before upload and leaves no 
 
   await assert.rejects(
     assets.uploadImage({ assetId: 'asset-1', idempotencyKey: 'upload-key-1', contentBase64: 'ignored' }, {
-      viewer: { userId: 'owner-1', isMember: true }, capabilities: { uploads: true },
+      viewer: { userId: 'owner-1', clubId: 'heiguang', isMember: true }, capabilities: { uploads: true },
     }),
     /storage unavailable/,
   );
@@ -173,9 +173,9 @@ test('upload storage failure records reservedFileId before upload and leaves no 
 
 test('orphan cleanup sends fileId, cleanedFileId and reservedFileId and keeps retry state on delete failure', async () => {
   const deleteCalls = [];
-  const updates = [];
+  const cleanupCalls = [];
   const asset = {
-    _id: 'asset-orphan', postId: '', status: 'uploaded',
+    _id: 'asset-orphan', clubId: 'heiguang', postId: '', status: 'uploaded',
     fileId: 'file-main', cleanedFileId: 'file-cleaned', reservedFileId: 'file-reserved',
     createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
   };
@@ -193,12 +193,16 @@ test('orphan cleanup sends fileId, cleanedFileId and reservedFileId and keeps re
       exists: (value) => ({ $exists: value }),
     }),
     serverDate: () => 'now',
+    getDb: () => ({ async rpc(name, args) {
+      cleanupCalls.push({ name, args });
+      return args.p_action === 'remove_orphan' ? { stats: { removed: 1 } } : { stats: { updated: 1 } };
+    } }),
     coll(name) {
       const chain = {};
       chain.where = (condition) => { chain.condition = condition; return chain; };
       chain.limit = () => chain;
       chain.get = async () => (name === 'hg_assets' ? { data: [asset] } : { data: [] });
-      chain.update = async ({ data }) => { updates.push({ condition: chain.condition, data }); return { stats: { updated: 1 } }; };
+      chain.update = async () => { throw new Error('asset cleanup writes must use hg_cleanup_asset'); };
       chain.remove = async () => ({ stats: { removed: 1 } });
       chain.doc = () => chain;
       return chain;
@@ -210,16 +214,17 @@ test('orphan cleanup sends fileId, cleanedFileId and reservedFileId and keeps re
     '../shared/db': db,
   });
 
-  const result = await cleanup.cleanupOrphanAssets();
+  const result = await cleanup.cleanupOrphanAssets('heiguang');
   assert.deepEqual(JSON.parse(JSON.stringify(deleteCalls)), [{ fileList: ['file-main', 'file-cleaned', 'file-reserved'] }]);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), { removed: 0, retryable: 1, skipped: 0 });
-  assert.equal(updates.some(({ data }) => data.cleanupState === 'retryable'), true);
+  assert.deepEqual(cleanupCalls.map(({ args }) => args.p_action), ['claim', 'retry']);
+  assert.equal(cleanupCalls.at(-1).args.p_patch.cleanupState, 'retryable');
 });
 
 test('purge clears every stored object id after successful delete', async () => {
-  const updates = [];
+  const cleanupCalls = [];
   const asset = {
-    _id: 'asset-revoked', postId: 'post-deleted', status: 'revoked',
+    _id: 'asset-revoked', clubId: 'heiguang', postId: 'post-deleted', status: 'revoked',
     fileId: 'file-main', cleanedFileId: 'file-cleaned', reservedFileId: 'file-reserved',
   };
   const cloud = {
@@ -234,12 +239,16 @@ test('purge clears every stored object id after successful delete', async () => 
   const db = {
     command: () => ({ exists: (value) => ({ $exists: value }) }),
     serverDate: () => 'now',
+    getDb: () => ({ async rpc(name, args) {
+      cleanupCalls.push({ name, args });
+      return { stats: { updated: 1 } };
+    } }),
     coll(name) {
       const chain = {};
       chain.where = (condition) => { chain.condition = condition; return chain; };
       chain.limit = () => chain;
       chain.get = async () => (name === 'hg_assets' ? { data: [asset] } : { data: [] });
-      chain.update = async ({ data }) => { updates.push({ condition: chain.condition, data }); return { stats: { updated: 1 } }; };
+      chain.update = async () => { throw new Error('asset cleanup writes must use hg_cleanup_asset'); };
       chain.remove = async () => ({ stats: { removed: 1 } });
       chain.doc = () => chain;
       return chain;
@@ -251,13 +260,14 @@ test('purge clears every stored object id after successful delete', async () => 
     '../shared/db': db,
   });
 
-  const result = await cleanup.cleanupDeletedPostAssets();
+  const result = await cleanup.cleanupDeletedPostAssets('heiguang');
   assert.equal(result.purged, 1);
-  const purgeUpdate = updates.find(({ data }) => data.status === 'purged');
-  assert.ok(purgeUpdate);
-  assert.equal(purgeUpdate.data.fileId, '');
-  assert.equal(purgeUpdate.data.cleanedFileId, '');
-  assert.equal(purgeUpdate.data.reservedFileId, '');
+  assert.deepEqual(cleanupCalls.map(({ args }) => args.p_action), ['claim', 'purge']);
+  const purge = cleanupCalls.at(-1).args.p_patch;
+  assert.equal(purge.status, 'purged');
+  assert.equal(purge.fileId, '');
+  assert.equal(purge.cleanedFileId, '');
+  assert.equal(purge.reservedFileId, '');
 });
 
 test('signReadableAssets re-signs only currently readable post assets and never signs private admin access', async () => {
@@ -281,14 +291,14 @@ test('signReadableAssets re-signs only currently readable post assets and never 
       JPEG_MIME: 'image/jpeg', PNG_MIME: 'image/png', sanitizeImageBase64() {},
     },
   });
-  const viewer = { userId: 'admin', isMember: true };
+  const viewer = { userId: 'admin', clubId: 'heiguang', isMember: true };
   const posts = [
-    { _id: 'public-post', ownerId: 'other', visibility: 'public', assetIds: ['public-asset'] },
-    { _id: 'private-post', ownerId: 'owner', visibility: 'private', assetIds: ['private-asset'] },
+    { _id: 'public-post', clubId: 'heiguang', ownerId: 'other', visibility: 'public', status: 'published', assetIds: ['public-asset'] },
+    { _id: 'private-post', clubId: 'heiguang', ownerId: 'owner', visibility: 'private', status: 'published', assetIds: ['private-asset'] },
   ];
   const input = [
-    { _id: 'public-asset', postId: 'public-post', status: 'verified', fileId: 'file-public' },
-    { _id: 'private-asset', postId: 'private-post', status: 'verified', fileId: 'file-private' },
+    { _id: 'public-asset', clubId: 'heiguang', postId: 'public-post', status: 'verified', fileId: 'file-public' },
+    { _id: 'private-asset', clubId: 'heiguang', postId: 'private-post', status: 'verified', fileId: 'file-private' },
   ];
   const first = await assets.signReadableAssets(input, posts, { viewer });
   const second = await assets.signReadableAssets(input, posts, { viewer });
@@ -303,7 +313,7 @@ test('media verification update is guarded by the observed status and fileId', a
   const usageCalls = [];
   let denyQuota = false;
   let imageCheckCalls = 0;
-  const asset = { _id: 'asset-media', mediaType: 'image', status: 'uploaded', fileId: 'file-v1' };
+  const asset = { _id: 'asset-media', clubId: 'heiguang', mediaType: 'image', status: 'uploaded', fileId: 'file-v1' };
   const storage = {
     async getTempFileURL() { return { fileList: [{ status: 0, tempFileURL: 'unused' }] }; },
     async downloadFile() { return { fileContent: Buffer.from('jpeg') }; },
@@ -348,16 +358,16 @@ test('media verification update is guarded by the observed status and fileId', a
     },
   });
 
-  const result = await media.processAsset({ targetId: asset._id });
+  const result = await media.processAsset({ targetId: asset._id, clubId: 'heiguang' });
   assert.equal(result.status, 'passed');
   assert.equal(updates.length, 1);
   assert.deepEqual(usageCalls, [{ kind: 'image', clubId: 'heiguang' }]);
-  assert.deepEqual(JSON.parse(JSON.stringify(updates[0].condition)), { _id: 'asset-media', status: 'uploaded', fileId: 'file-v1' });
+  assert.deepEqual(JSON.parse(JSON.stringify(updates[0].condition)), { clubId: 'heiguang', _id: 'asset-media', status: 'uploaded', fileId: 'file-v1' });
   assert.equal(updates[0].data.status, 'verified');
   assert.equal(imageCheckCalls, 1);
 
   denyQuota = true;
-  const waiting = await media.processAsset({ targetId: asset._id });
+  const waiting = await media.processAsset({ targetId: asset._id, clubId: 'heiguang' });
   assert.equal(waiting.status, 'queued');
   assert.equal(waiting.waitingReason, 'usage_quota');
   assert.equal(new Date(waiting.nextAttemptAt).toISOString(), '2026-09-24T00:00:00.000Z');

@@ -45,6 +45,7 @@ test('local media storage keeps legacy pgstore IDs, stores private bytes, and is
 
   const url = storage.createAssetUrl({
     assetId: 'asset-123',
+    clubId: 'heiguang',
     fileId: metadata.data.fileId,
     userId: 'internal-user-id',
     permissionVersion: 7,
@@ -54,6 +55,7 @@ test('local media storage keeps legacy pgstore IDs, stores private bytes, and is
   const parsed = new URL(url);
   const claim = storage.verifyAssetUrl({ token: parsed.searchParams.get('t'), signature: parsed.searchParams.get('s') });
   assert.equal(claim.userId, 'internal-user-id');
+  assert.equal(claim.clubId, 'heiguang');
   assert.equal(claim.permissionVersion, 7);
   assert.equal(storage.verifyAssetUrl({ token: parsed.searchParams.get('t'), signature: 'tampered' }), null);
   assert.equal(storage.verifyAssetUrl({ token: parsed.searchParams.get('t'), signature: parsed.searchParams.get('s'), now: (claim.exp + 1) * 1000 }), null);
@@ -72,10 +74,11 @@ test('Bearer parsing accepts only the opaque 32-byte token shape', () => {
 
 test('NAS migration inventory matches the current CloudBase source schema', async () => {
   const schema = await readMigrationSet();
-  assert.equal(schema.migrations.length, 22);
-  assert.equal(schema.latestVersion, '20260927160000');
+  assert.equal(schema.migrations.length, 24);
+  assert.equal(schema.latestVersion, '20261003090000');
   assert.equal(schema.tables.length, 27);
   assert.equal(schema.tables.some((table) => table.name === 'hg_sessions'), false);
+  assert.deepEqual(schema.tables.find((table) => table.name === 'hg_user_xp_accounts').primaryKey, ['user_id', 'club_id']);
 });
 
 test('snapshot import refuses table drift and any target business rows', () => {
@@ -119,6 +122,7 @@ test('NAS LAN profile creates HTTP media links only for the fixed LAN host and p
   const storage = createLocalStorageAdapter();
   const options = {
     assetId: 'asset-lan-test',
+    clubId: 'heiguang',
     fileId: 'pgstore://blacklight-private/private/image/test.jpg',
     userId: 'user-lan-test',
     permissionVersion: 1,
@@ -180,7 +184,7 @@ test('assets/upload sanitizes an image and writes it through the local private a
   png.data = Buffer.from([255, 32, 8, 255]);
   const input = PNG.sync.write(png);
   const asset = {
-    _id: 'asset-upload-1', ownerId: 'user-upload-1', mediaType: 'image', mimeType: 'image/png',
+    _id: 'asset-upload-1', ownerId: 'user-upload-1', clubId: 'heiguang', mediaType: 'image', mimeType: 'image/png',
     declaredSize: input.length, status: constants.ASSET_STATUS.INTENT,
     cloudPath: 'private/image/abcdef0123456789abcdef0123456789abcdef0123456789.jpg',
   };
@@ -224,7 +228,8 @@ test('assets/upload sanitizes an image and writes it through the local private a
   }
 
   const result = await assets.uploadImage({ assetId: asset._id, contentBase64: input.toString('base64'), idempotencyKey: 'upload-key-1' }, {
-    viewer: { userId: asset.ownerId, isMember: true },
+    viewer: { userId: asset.ownerId, clubId: 'heiguang', isMember: true },
+    club: { clubId: 'heiguang' },
     capabilities: { uploads: true },
   });
   assert.equal(result.status, constants.ASSET_STATUS.UPLOADED);

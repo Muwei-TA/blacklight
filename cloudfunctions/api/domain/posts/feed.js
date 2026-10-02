@@ -5,7 +5,6 @@ const {
   VISIBILITY,
   IDENTITY_MODE,
   BOARD_STATUS,
-  DEFAULT_CLUB_ID,
 } = require('../../shared/constants');
 const policies = require('../../shared/policies');
 const validators = require('../../shared/validators');
@@ -23,7 +22,7 @@ const assetDomain = require('../assets');
 function buildFeedWhere(viewer, extra = {}) {
   const _ = db.command();
   const base = {
-    clubId: DEFAULT_CLUB_ID,
+    clubId: viewer.clubId,
     status: POST_STATUS.PUBLISHED,
     ...extra,
   };
@@ -40,6 +39,7 @@ function buildFeedWhere(viewer, extra = {}) {
 /** 批量装配卡片所需的关联数据，避免 N+1 */
 async function hydrateCards(posts, ctx) {
   if (posts.length === 0) return [];
+  const clubId = ctx.viewer.clubId;
 
   const namedOwnerIds = posts
     .filter((p) => p.identityMode !== IDENTITY_MODE.ANONYMOUS)
@@ -51,12 +51,12 @@ async function hydrateCards(posts, ctx) {
 
   const [users, assets, topics, boards, myReactions, myBookmarks, aliasDocs] = await Promise.all([
     db.findByIds(COLLECTIONS.users, namedOwnerIds),
-    db.findByIds(COLLECTIONS.assets, assetIds),
-    db.findByIds(COLLECTIONS.topics, topicIds),
-    db.findByIds(COLLECTIONS.boards, boardIds),
-    ctx.viewer.userId ? loadMyFlags(COLLECTIONS.reactions, ctx.viewer.userId, postIds) : Promise.resolve(new Set()),
-    ctx.viewer.userId ? loadMyFlags(COLLECTIONS.bookmarks, ctx.viewer.userId, postIds) : Promise.resolve(new Set()),
-    loadAliases(posts),
+    db.findByIds(COLLECTIONS.assets, assetIds, clubId),
+    db.findByIds(COLLECTIONS.topics, topicIds, clubId),
+    db.findByIds(COLLECTIONS.boards, boardIds, clubId),
+    ctx.viewer.userId ? loadMyFlags(COLLECTIONS.reactions, ctx.viewer.userId, postIds, clubId) : Promise.resolve(new Set()),
+    ctx.viewer.userId ? loadMyFlags(COLLECTIONS.bookmarks, ctx.viewer.userId, postIds, clubId) : Promise.resolve(new Set()),
+    loadAliases(posts, clubId),
   ]);
 
   const userById = new Map(users.map((u) => [u._id, u]));
@@ -79,12 +79,13 @@ async function hydrateCards(posts, ctx) {
   );
 }
 
-async function loadMyFlags(collection, userId, postIds) {
+async function loadMyFlags(collection, userId, postIds, clubId) {
   const _ = db.command();
   const res = await db
-    .coll(collection)
+    .coll(collection, clubId)
     .where({
       userId,
+      clubId,
       postId: _.in(postIds),
       // 评论共鸣与原帖共鸣共表；收藏查询不附加共鸣类型条件。
       ...(collection === COLLECTIONS.reactions ? { commentId: _.exists(false) } : {}),
@@ -99,14 +100,14 @@ async function loadMyFlags(collection, userId, postIds) {
  * 读取匿名帖的 alias。
  * 只取 alias 字段；userId 映射留在受限集合中，不进入这里的返回值。
  */
-async function loadAliases(posts) {
+async function loadAliases(posts, clubId) {
   const anonPosts = posts.filter((p) => p.identityMode === IDENTITY_MODE.ANONYMOUS);
   if (anonPosts.length === 0) return new Map();
 
   const _ = db.command();
   const res = await db
-    .coll(COLLECTIONS.anonymousIdentities)
-    .where({ threadId: _.in(anonPosts.map((p) => p._id)), isThreadAuthor: true })
+    .coll(COLLECTIONS.anonymousIdentities, clubId)
+    .where({ clubId, threadId: _.in(anonPosts.map((p) => p._id)), isThreadAuthor: true })
     .limit(anonPosts.length)
     .get()
     .catch(() => ({ data: [] }));
@@ -123,7 +124,7 @@ async function listFeed(payload, ctx) {
   if (payload.topicId) extra.topicId = validators.optionalId(payload.topicId, 'topicId');
   const boardId = validators.optionalId(payload.boardId, 'boardId');
   if (boardId) {
-    const board = await db.findOneById(COLLECTIONS.boards, boardId);
+    const board = await db.findOneById(COLLECTIONS.boards, boardId, ctx.viewer.clubId);
     if (!policies.canReadBoard(ctx.viewer, board)) throw errors.notAccessible({ boardId });
     if (board.status !== BOARD_STATUS.ACTIVE) return { items: [], nextCursor: null };
     extra.boardId = boardId;
@@ -140,7 +141,7 @@ async function listFeed(payload, ctx) {
   }
 
   const where = buildFeedWhere(ctx.viewer, extra);
-  const { items, hasMore } = await db.paginate(COLLECTIONS.posts, where, { cursor, pageSize });
+  const { items, hasMore } = await db.paginate(COLLECTIONS.posts, where, { cursor, pageSize, clubId: ctx.viewer.clubId });
 
   const cards = await hydrateCards(items, ctx);
   // 开发期自检：确保没有匿名映射漏出
@@ -155,7 +156,7 @@ async function listFeed(payload, ctx) {
 /** GET /posts/{id} —— 详情。无权与不存在返回同一形态。 */
 async function getDetail(payload, ctx) {
   const id = validators.requireId(payload.id, 'id');
-  const post = await db.findOneById(COLLECTIONS.posts, id);
+  const post = await db.findOneById(COLLECTIONS.posts, id, ctx.viewer.clubId);
 
   if (!policies.canReadPost(ctx.viewer, post)) {
     throw errors.notAccessible({ postId: id, role: ctx.viewer.role });
@@ -165,13 +166,13 @@ async function getDetail(payload, ctx) {
     post.identityMode === IDENTITY_MODE.ANONYMOUS
       ? Promise.resolve(null)
       : db.findOneById(COLLECTIONS.users, post.ownerId),
-    db.findByIds(COLLECTIONS.assets, post.assetIds || []),
-    post.topicId ? db.findOneById(COLLECTIONS.topics, post.topicId) : Promise.resolve(null),
-    post.boardId ? db.findOneById(COLLECTIONS.boards, post.boardId) : Promise.resolve(null),
-    loadAliases([post]),
-    ctx.viewer.userId ? loadMyFlags(COLLECTIONS.reactions, ctx.viewer.userId, [id]) : Promise.resolve(new Set()),
-    ctx.viewer.userId ? loadMyFlags(COLLECTIONS.bookmarks, ctx.viewer.userId, [id]) : Promise.resolve(new Set()),
-    db.findOneById(COLLECTIONS.consents, `${id}:collection`),
+    db.findByIds(COLLECTIONS.assets, post.assetIds || [], ctx.viewer.clubId),
+    post.topicId ? db.findOneById(COLLECTIONS.topics, post.topicId, ctx.viewer.clubId) : Promise.resolve(null),
+    post.boardId ? db.findOneById(COLLECTIONS.boards, post.boardId, ctx.viewer.clubId) : Promise.resolve(null),
+    loadAliases([post], ctx.viewer.clubId),
+    ctx.viewer.userId ? loadMyFlags(COLLECTIONS.reactions, ctx.viewer.userId, [id], ctx.viewer.clubId) : Promise.resolve(new Set()),
+    ctx.viewer.userId ? loadMyFlags(COLLECTIONS.bookmarks, ctx.viewer.userId, [id], ctx.viewer.clubId) : Promise.resolve(new Set()),
+    db.findOneById(COLLECTIONS.consents, `${id}:collection`, ctx.viewer.clubId),
   ]);
 
   const readableAssets = await assetDomain.signReadableAssets(assets, [post], ctx);

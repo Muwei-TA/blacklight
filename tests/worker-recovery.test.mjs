@@ -89,9 +89,27 @@ const worker = requireWithMocks('../cloudfunctions/worker/index.js', {
     './shared/anonymity': { scrubForLog: (value) => value },
   },
 });
-const cleanupState = { assets: [], updates: [], removes: 0 };
+const cleanupState = { assets: [], rpcCalls: [], updates: [], removes: 0 };
 const cleanupDb = {
   ...fakeDb,
+  getDb() {
+    return {
+      async rpc(name, args) {
+        cleanupState.rpcCalls.push({ name, args });
+        if (name !== 'hg_cleanup_asset') throw new Error(`unexpected cleanup RPC: ${name}`);
+        const index = cleanupState.assets.findIndex((asset) => asset._id === args.p_asset_id);
+        const asset = cleanupState.assets[index];
+        if (!asset) return args.p_action === 'remove_orphan'
+          ? { stats: { removed: 0 } } : { stats: { updated: 0 } };
+        if (args.p_action === 'remove_orphan') {
+          cleanupState.assets.splice(index, 1);
+          return { stats: { removed: 1 } };
+        }
+        Object.assign(asset, args.p_patch);
+        return { stats: { updated: 1 } };
+      },
+    };
+  },
   coll(name) {
     const chain = {
       where(condition) {
@@ -102,15 +120,16 @@ const cleanupDb = {
         return chain;
       },
       async get() {
-        if (name === fakeConstants.COLLECTIONS.assets && !chain.claimed) return { data: cleanupState.assets };
+        if (name === fakeConstants.COLLECTIONS.assets) return { data: cleanupState.assets };
         return { data: [] };
       },
       async update({ data }) {
+        if (name === fakeConstants.COLLECTIONS.assets) throw new Error('asset cleanup writes must use hg_cleanup_asset');
         cleanupState.updates.push({ name, condition: chain.condition, data });
-        chain.claimed = true;
         return { stats: { updated: 1 } };
       },
       async remove() {
+        if (name === fakeConstants.COLLECTIONS.assets) throw new Error('asset cleanup writes must use hg_cleanup_asset');
         cleanupState.removes += 1;
         return { stats: { removed: 1 } };
       },
@@ -206,13 +225,14 @@ test('WeChat IDE timers require fresh trusted source, app binding and no client 
 
 test('回调 trace/version 绑定拒绝旧版本', () => {
   const { assetBindingMatches, assetCondition } = callback._internals;
-  const asset = { _id: 'asset-1', traceId: 'trace-new', postVersion: 4, reviewVersion: 2 };
+  const asset = { _id: 'asset-1', clubId: 'heiguang', traceId: 'trace-new', postVersion: 4, reviewVersion: 2 };
   assert.equal(assetBindingMatches({ traceId: 'trace-old', result: { reviewVersion: 2 } }, asset), false);
   assert.equal(assetBindingMatches({ result: { reviewVersion: 1 } }, asset), false);
   assert.equal(assetBindingMatches({ result: { reviewVersion: 2 } }, asset), true);
   assert.equal(assetBindingMatches({ assetId: 'asset-other', result: { reviewVersion: 2 } }, asset), false);
   assert.deepEqual(assetCondition(asset), {
     _id: 'asset-1',
+    clubId: 'heiguang',
     status: 'verifying',
     traceId: 'trace-new',
     postVersion: 4,
@@ -223,6 +243,7 @@ test('回调 trace/version 绑定拒绝旧版本', () => {
 test('云存储删除失败保留资产记录并写 retryable 状态', async () => {
   cleanupState.assets = [{
     _id: 'asset-orphan',
+    clubId: 'heiguang',
     fileId: 'cloud://orphan',
     postId: '',
     status: 'uploaded',
@@ -230,30 +251,55 @@ test('云存储删除失败保留资产记录并写 retryable 状态', async () 
   }];
   cleanupState.updates = [];
   cleanupState.removes = 0;
+  cleanupState.rpcCalls = [];
   fakeCloud.deleteFile = async () => {
     throw new Error('storage temporarily unavailable');
   };
 
-  const result = await cleanup.cleanupOrphanAssets();
+  const result = await cleanup.cleanupOrphanAssets('heiguang');
   assert.equal(result.removed, 0);
   assert.equal(result.retryable, 1);
   assert.equal(cleanupState.removes, 0);
-  assert.equal(cleanupState.updates.some(({ data }) => data.cleanupState === 'retryable'), true);
+  assert.deepEqual(cleanupState.rpcCalls.map(({ args }) => args.p_action), ['claim', 'retry']);
+  assert.equal(cleanupState.rpcCalls.at(-1).args.p_patch.cleanupState, 'retryable');
+});
+
+test('孤儿附件只有文件删除成功后才通过 cleanup RPC 移除并沿用 claim token', async () => {
+  cleanupState.assets = [{
+    _id: 'asset-orphan-success', ownerId: 'user-orphan', clubId: 'heiguang', fileId: 'cloud://orphan-success',
+    postId: '', status: 'verified', createdAt: new Date(Date.now() - cleanup.ORPHAN_ASSET_TTL - 1_000),
+  }];
+  cleanupState.updates = [];
+  cleanupState.removes = 0;
+  cleanupState.rpcCalls = [];
+  fakeCloud.deleteFile = async ({ fileList }) => ({ fileList: fileList.map((fileID) => ({ fileID, status: 0 })) });
+
+  const result = await cleanup.cleanupOrphanAssets('heiguang');
+  assert.equal(result.removed, 1);
+  assert.deepEqual(cleanupState.rpcCalls.map(({ args }) => args.p_action), ['claim', 'remove_orphan']);
+  const [claim, remove] = cleanupState.rpcCalls.map(({ args }) => args);
+  assert.equal(claim.p_expected.cleanupState.$missing, true);
+  assert.equal(remove.p_expected.cleanupClaimedAt, claim.p_patch.cleanupClaimedAt);
+  assert.equal(remove.p_expected.postId, '');
+  assert.equal(cleanupState.assets.length, 0);
 });
 
 test('worker cleanup 分支在文件确认删除后才把 revoked 标成 purged', async () => {
   cleanupState.assets = [{
     _id: 'asset-revoked',
+    clubId: 'heiguang',
     fileId: 'cloud://revoked',
     postId: 'post-deleted',
     status: 'revoked',
   }];
   cleanupState.updates = [];
   cleanupState.removes = 0;
+  cleanupState.rpcCalls = [];
   fakeCloud.deleteFile = async () => ({ fileList: [{ fileID: 'cloud://revoked', status: 0 }] });
 
-  const result = await cleanup.cleanupDeletedPostAssets();
+  const result = await cleanup.cleanupDeletedPostAssets('heiguang');
   assert.equal(result.purged, 1);
   assert.equal(result.retryable, 0);
-  assert.equal(cleanupState.updates.some(({ data }) => data.status === 'purged'), true);
+  assert.deepEqual(cleanupState.rpcCalls.map(({ args }) => args.p_action), ['claim', 'purge']);
+  assert.equal(cleanupState.rpcCalls.at(-1).args.p_patch.status, 'purged');
 });

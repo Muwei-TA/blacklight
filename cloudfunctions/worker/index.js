@@ -10,7 +10,7 @@
  * 3. 所有任务共享 shared/policies 的权限规则，不各自复制一份判断。
  */
 
-const { COLLECTIONS, REVIEW_TASK_STATUS, DEFAULT_CLUB_ID } = require('./shared/constants');
+const { COLLECTIONS, REVIEW_TASK_STATUS } = require('./shared/constants');
 const db = require('./shared/db');
 const { scrubForLog } = require('./shared/anonymity');
 
@@ -67,7 +67,7 @@ function verifyWorkerSource(cloud, event = {}, runtime = process.env, context = 
 }
 
 function taskLeaseCondition(task, now, _) {
-  const condition = { _id: task._id, status: task.status };
+  const condition = { _id: task._id, clubId: task.clubId, status: task.status };
   const attempts = Number(task.attempts);
   if (Number.isFinite(attempts)) {
     condition.attempts = attempts >= MAX_ATTEMPTS
@@ -109,6 +109,7 @@ function taskLeaseCondition(task, now, _) {
 function taskOwnerCondition(task) {
   return {
     _id: task._id,
+    clubId: task.clubId,
     status: task.status || REVIEW_TASK_STATUS.RUNNING,
     leaseId: task.leaseId,
   };
@@ -116,7 +117,7 @@ function taskOwnerCondition(task) {
 
 async function conditionalTaskUpdate(task, data) {
   const result = await db
-    .coll(COLLECTIONS.reviewTasks)
+    .coll(COLLECTIONS.reviewTasks, task.clubId)
     .where(taskOwnerCondition(task))
     .update({ data });
   return !!(result.stats && result.stats.updated === 1);
@@ -125,7 +126,7 @@ async function conditionalTaskUpdate(task, data) {
 async function recoverExhaustedTask(task, now, _) {
   const condition = taskLeaseCondition(task, now, _);
   const result = await db
-    .coll(COLLECTIONS.reviewTasks)
+    .coll(COLLECTIONS.reviewTasks, task.clubId)
     .where(condition)
     .update({
       data: {
@@ -147,11 +148,13 @@ async function claimTasks(limit = BATCH_SIZE, {
   now = Date.now(),
   invocationId = 'worker',
   stats = {},
+  clubId,
 } = {}) {
+  if (!clubId) throw new Error('worker claim club is required');
   const _ = db.command();
   const res = await db
-    .coll(COLLECTIONS.reviewTasks)
-    .where({ $or: [
+    .coll(COLLECTIONS.reviewTasks, clubId)
+    .where({ clubId, $or: [
       { status: REVIEW_TASK_STATUS.QUEUED, $or: [
         { nextAttemptAt: _.exists(false) }, { nextAttemptAt: null }, { nextAttemptAt: _.lte(new Date(now)) },
       ] },
@@ -177,16 +180,17 @@ async function claimTasks(limit = BATCH_SIZE, {
       // This covers a task left running by a timed-out legacy worker after it
       // had already used all failure attempts. It must become visible to the
       // manual queue instead of remaining permanently running.
-      if (await recoverExhaustedTask(task, now, _)) stats.recovered = (stats.recovered || 0) + 1;
+      if (await recoverExhaustedTask({ ...task, clubId }, now, _)) stats.recovered = (stats.recovered || 0) + 1;
       continue;
     }
 
     const leaseId = recovery.createLeaseId(invocationId);
     // 乐观抢占：只有把 queued 改成 running 成功的实例才处理该任务。
     // 过期 running 任务也必须匹配同一旧 lease，避免两个实例重复生效。
+    const scopedTask = { ...task, clubId };
     const upd = await db
-      .coll(COLLECTIONS.reviewTasks)
-      .where(taskLeaseCondition(task, recovery.nowMillis(now), _))
+      .coll(COLLECTIONS.reviewTasks, clubId)
+      .where(taskLeaseCondition(scopedTask, recovery.nowMillis(now), _))
       .update({
         data: {
           status: REVIEW_TASK_STATUS.RUNNING,
@@ -195,7 +199,7 @@ async function claimTasks(limit = BATCH_SIZE, {
       });
 
     if (upd.stats && upd.stats.updated === 1) {
-      claimed.push({ ...task, status: REVIEW_TASK_STATUS.RUNNING, leaseId });
+      claimed.push({ ...scopedTask, status: REVIEW_TASK_STATUS.RUNNING, leaseId });
     }
   }
 
@@ -215,6 +219,71 @@ async function runTask(task) {
       return reviewTasks.precheckCollectionSubmission(task);
     default:
       return { status: REVIEW_TASK_STATUS.MANUAL, note: `unknown targetType: ${task.targetType}` };
+  }
+}
+
+async function listAllClubs() {
+  const result = await db.getDb().rpc('hg_all_club_ids', {});
+  const items = Array.isArray(result) ? result : result && result.items;
+  if (!Array.isArray(items)) throw new Error('club list RPC returned invalid result');
+  return items.filter((item) => item && typeof item.clubId === 'string' && item.clubId);
+}
+
+async function updateClubWorkerState(clubId, data) {
+  await db.coll(COLLECTIONS.clubConfig, clubId).doc(clubId).update({ data });
+}
+
+async function processClaimedTasks(tasks, summary, clubSummary) {
+  for (const task of tasks) {
+    try {
+      const result = await runTask(task);
+      if (!result || typeof result.status !== 'string') throw new Error('task returned invalid status');
+
+      const update = recovery.isWaitingResult(result)
+        ? recovery.buildWaitingUpdate(result)
+        : recovery.buildTerminalUpdate(result);
+      const updated = await conditionalTaskUpdate(task, update);
+      if (!updated) {
+        summary.stale += 1;
+        clubSummary.stale += 1;
+        console.warn('[worker] task lease lost before result write', scrubForLog({ taskId: task._id }));
+      } else if (recovery.isWaitingResult(result)) {
+        summary.waiting += 1;
+        clubSummary.waiting += 1;
+      } else if (result.status === REVIEW_TASK_STATUS.MANUAL) {
+        summary.manual += 1;
+        clubSummary.manual += 1;
+      } else {
+        summary.done += 1;
+        clubSummary.done += 1;
+      }
+    } catch (err) {
+      summary.failed += 1;
+      clubSummary.failed += 1;
+      const failure = recovery.buildFailureUpdate(task, err);
+      try {
+        const updated = await conditionalTaskUpdate(task, failure.update);
+        if (!updated) {
+          summary.stale += 1;
+          clubSummary.stale += 1;
+        } else if (failure.exhausted) {
+          summary.manual += 1;
+          clubSummary.manual += 1;
+        }
+      } catch (updateErr) {
+        console.error('[worker] task failure state write failed', scrubForLog({
+          taskId: task._id,
+          message: updateErr.message,
+        }));
+      }
+
+      console.error('[worker] task failed', scrubForLog({
+        taskId: task._id,
+        message: err.message,
+        attempts: failure.attempts,
+        exhausted: failure.exhausted,
+      }));
+    }
   }
 }
 
@@ -274,89 +343,88 @@ exports.main = async (event = {}, context = {}) => {
     waiting: 0,
     stale: 0,
     recovered: 0,
-    usage: null,
-    usageFailed: false,
+    clubs: {},
     source: source.source,
   };
 
+  let clubs;
+  try {
+    clubs = await listAllClubs();
+  } catch (err) {
+    console.error('[worker] club list failed', { code: err.code || 'club_list_error' });
+    return { code: 'server', data: { ...summary, failed: 1 } };
+  }
+  const clubIds = clubs.map((club) => club.clubId);
+  for (const clubId of clubIds) {
+    summary.clubs[clubId] = {
+      claimed: 0, done: 0, failed: 0, manual: 0, waiting: 0, stale: 0, recovered: 0,
+      digest: null, cleanup: null, usage: null,
+    };
+  }
+
   if (mode === 'all' || mode === 'review') {
-    const claimStats = {};
     const invocationId = context.requestId || context.request_id || 'worker';
-    const tasks = await claimTasks(limit, { invocationId, stats: claimStats });
-    summary.claimed = tasks.length;
-    summary.recovered = claimStats.recovered || 0;
-
-    for (const task of tasks) {
-      try {
-        const result = await runTask(task);
-        if (!result || typeof result.status !== 'string') throw new Error('task returned invalid status');
-
-        const update = recovery.isWaitingResult(result)
-          ? recovery.buildWaitingUpdate(result)
-          : recovery.buildTerminalUpdate(result);
-        const updated = await conditionalTaskUpdate(task, update);
-        if (!updated) {
-          summary.stale += 1;
-          console.warn('[worker] task lease lost before result write', scrubForLog({ taskId: task._id }));
-        } else if (recovery.isWaitingResult(result)) {
-          // Waiting for an asset/callback/editor is not a failed execution and
-          // therefore does not increase attempts.
-          summary.waiting += 1;
-        } else if (result.status === REVIEW_TASK_STATUS.MANUAL) summary.manual += 1;
-        else summary.done += 1;
-      } catch (err) {
-        summary.failed += 1;
-        const failure = recovery.buildFailureUpdate(task, err);
-        try {
-          const updated = await conditionalTaskUpdate(task, failure.update);
-          if (!updated) {
-            summary.stale += 1;
-          } else if (failure.exhausted) {
-            summary.manual += 1;
-          }
-        } catch (updateErr) {
-          // The lease remains owned by this invocation if the failure write
-          // itself failed. Keeping the task running lets lease recovery retry
-          // it; never claim a failed state was persisted.
-          console.error('[worker] task failure state write failed', scrubForLog({
-            taskId: task._id,
-            message: updateErr.message,
-          }));
-        }
-
-        console.error('[worker] task failed', scrubForLog({
-          taskId: task._id,
-          message: err.message,
-          attempts: failure.attempts,
-          exhausted: failure.exhausted,
-        }));
-      }
+    const activeClubs = await Promise.all(clubs
+      .filter((club) => club.status === 'active' || (club.clubId === 'heiguang' && !club.status))
+      .map(async (club) => ({ ...club, config: await db.findOneById(COLLECTIONS.clubConfig, club.clubId, club.clubId) })));
+    activeClubs.sort((left, right) => {
+      const leftRun = new Date(left.config && left.config.workerTaskLastRunAt || 0).getTime() || 0;
+      const rightRun = new Date(right.config && right.config.workerTaskLastRunAt || 0).getTime() || 0;
+      return leftRun - rightRun;
+    });
+    const baseLimit = activeClubs.length ? Math.floor(limit / activeClubs.length) : 0;
+    const remainder = activeClubs.length ? limit % activeClubs.length : 0;
+    for (const [index, club] of activeClubs.entries()) {
+      const clubId = club.clubId;
+      const clubLimit = baseLimit + (index < remainder ? 1 : 0);
+      if (!clubLimit) continue;
+      const claimStats = {};
+      const tasks = await claimTasks(clubLimit, { invocationId, stats: claimStats, clubId });
+      const clubSummary = summary.clubs[clubId];
+      summary.claimed += tasks.length;
+      clubSummary.claimed += tasks.length;
+      summary.recovered += claimStats.recovered || 0;
+      clubSummary.recovered += claimStats.recovered || 0;
+      await updateClubWorkerState(clubId, { workerTaskLastRunAt: db.serverDate() });
+      await processClaimedTasks(tasks, summary, clubSummary);
     }
   }
 
   if (mode === 'all' || mode === 'digest') {
-    // 共鸣聚合：避免一人连点造成通知刷屏
-    await digestTasks.buildReactionDigests().catch((err) => console.error('[worker] digest', err.message));
-  }
-
-  if (mode === 'all' || mode === 'cleanup') {
-    // 孤儿附件、已删除内容媒体与过期幂等键清理，按已告知的保留策略执行
-    await cleanupTasks.cleanupOrphanAssets().catch((err) => console.error('[worker] cleanup assets', err.message));
-    await cleanupTasks.cleanupDeletedPostAssets().catch((err) => console.error('[worker] cleanup deleted assets', err.message));
-    await cleanupTasks.cleanupIdempotency().catch((err) => console.error('[worker] cleanup idem', err.message));
-    await cleanupTasks.processAccountDeletions().catch((err) => console.error('[worker] deletion', err.message));
-  }
-
-  if (mode === 'all' || mode === 'usage') {
-    try {
-      summary.usage = await usageTasks.refreshUsageSummary();
-    } catch (err) {
-      summary.usageFailed = true;
-      console.warn('[worker] usage summary failed', { message: err.message });
+    for (const club of clubs.filter((item) => item.status === 'active' || (item.clubId === 'heiguang' && !item.status))) {
+      try { summary.clubs[club.clubId].digest = await digestTasks.buildReactionDigests(club.clubId); }
+      catch (err) { console.error('[worker] digest', { clubId: club.clubId, message: err.message }); }
     }
   }
 
-  await db.coll(COLLECTIONS.clubConfig).doc(DEFAULT_CLUB_ID).update({ data: { workerLastRunAt: db.serverDate(), workerSummary: summary } });
+  if (mode === 'all' || mode === 'cleanup') {
+    for (const clubId of clubIds) {
+      const result = {};
+      try { result.orphans = await cleanupTasks.cleanupOrphanAssets(clubId); }
+      catch (err) { console.error('[worker] cleanup assets', { clubId, message: err.message }); }
+      try { result.deleted = await cleanupTasks.cleanupDeletedPostAssets(clubId); }
+      catch (err) { console.error('[worker] cleanup deleted assets', { clubId, message: err.message }); }
+      try { result.idempotency = await cleanupTasks.cleanupIdempotency(clubId); }
+      catch (err) { console.error('[worker] cleanup idem', { clubId, message: err.message }); }
+      summary.clubs[clubId].cleanup = result;
+    }
+    try { await cleanupTasks.processAccountDeletions(clubIds); }
+    catch (err) { console.error('[worker] deletion', { message: err.message }); }
+  }
+
+  if (mode === 'all' || mode === 'usage') {
+    for (const clubId of clubIds) {
+      try { summary.clubs[clubId].usage = await usageTasks.refreshUsageSummary(clubId); }
+      catch (err) {
+        console.warn('[worker] usage summary failed', { clubId, message: err.message });
+      }
+    }
+  }
+
+  const completedAt = db.serverDate();
+  for (const clubId of clubIds) {
+    await updateClubWorkerState(clubId, { workerLastRunAt: completedAt, workerSummary: summary.clubs[clubId] });
+  }
   console.log('[worker] summary', summary);
   return { code: 0, data: summary };
 };

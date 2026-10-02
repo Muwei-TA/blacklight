@@ -1,6 +1,6 @@
 'use strict';
 
-const { COLLECTIONS, DEFAULT_CLUB_ID, ASSET_STATUS } = require('../shared/constants');
+const { COLLECTIONS, ASSET_STATUS } = require('../shared/constants');
 const { resolveContext } = require('../shared/session');
 const policies = require('../shared/policies');
 const db = require('../shared/db');
@@ -15,33 +15,39 @@ function sameVersion(left, right) {
   return String(left) === String(right);
 }
 
-async function resolveSubjectContext(userId) {
-  if (!userId) return resolveContext(null, DEFAULT_CLUB_ID);
-  const user = await db.findOneById(COLLECTIONS.users, userId);
-  if (!user || user.status !== 'active' || !user.wxOpenIdRef) return null;
-  const ctx = await resolveContext(user.wxOpenIdRef, DEFAULT_CLUB_ID);
-  if (!ctx.user || ctx.user._id !== userId) return null;
-  return ctx;
+async function resolveSubjectContext(userId, clubId) {
+  if (!clubId) return null;
+  try {
+    if (!userId) return await resolveContext(null, clubId);
+    const user = await db.findOneById(COLLECTIONS.users, userId);
+    if (!user || user.status !== 'active' || !user.wxOpenIdRef) return null;
+    const ctx = await resolveContext(user.wxOpenIdRef, clubId);
+    if (!ctx.user || ctx.user._id !== userId) return null;
+    return ctx;
+  } catch (_) {
+    return null;
+  }
 }
 
 async function getAuthorizedMedia({ assetId, token, signature }) {
   const storage = db.getStorage();
   if (typeof storage.verifyAssetUrl !== 'function') return null;
   const claim = storage.verifyAssetUrl({ token, signature });
-  if (!claim || claim.assetId !== assetId) return null;
+  if (!claim || claim.assetId !== assetId || typeof claim.clubId !== 'string') return null;
 
-  const asset = await db.findOneById(COLLECTIONS.assets, assetId);
-  if (!asset || asset.status !== ASSET_STATUS.VERIFIED || asset.fileId !== claim.fileId) return null;
+  const asset = await db.findOneById(COLLECTIONS.assets, assetId, claim.clubId);
+  if (!asset || asset.clubId !== claim.clubId || asset.status !== ASSET_STATUS.VERIFIED || asset.fileId !== claim.fileId) return null;
 
-  const ctx = await resolveSubjectContext(claim.userId || null);
+  const ctx = await resolveSubjectContext(claim.userId || null, asset.clubId);
   if (!ctx) return null;
 
   let post = null;
   if (asset.postId) {
-    post = await db.findOneById(COLLECTIONS.posts, asset.postId);
-    if (!post || !policies.canReadPost(ctx.viewer, post)) return null;
+    post = await db.findOneById(COLLECTIONS.posts, asset.postId, asset.clubId);
+    if (!post || post.clubId !== asset.clubId) return null;
+    if (!policies.canReadPost(ctx.viewer, post)) return null;
     if (post._id !== asset.postId || !(post.assetIds || []).includes(asset._id)) return null;
-  } else if (!claim.userId || asset.ownerId !== claim.userId || ctx.viewer.userId !== claim.userId) {
+  } else if (!claim.userId || asset.ownerId !== claim.userId || ctx.viewer.userId !== claim.userId || !ctx.viewer.isMember) {
     return null;
   }
 

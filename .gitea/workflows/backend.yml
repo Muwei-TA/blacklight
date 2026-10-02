@@ -53,6 +53,12 @@ jobs:
           POSTGRES_DB: blacklight_test
         run: |
           set -euo pipefail
+          PG_TEST_URL=postgresql://postgres:postgres@postgres:5432/blacklight_test \
+          HG_TEST_DATABASE_RESET=yes node --test tests/integration/comment-reaction-pg.test.mjs
+          # The historical RPC regression installs an old function; rebuild only this job's disposable schema.
+          test "$POSTGRES_DB" = blacklight_test
+          psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+            -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT USAGE ON SCHEMA public TO PUBLIC;'
           password_file=$(mktemp)
           trap 'rm -f "$password_file"' EXIT
           printf '%s' 'ci-only-app-password' > "$password_file"
@@ -62,7 +68,7 @@ jobs:
           NAS_APP_DATABASE_PASSWORD_FILE="$password_file" \
           bash scripts/local-apply-migrations.sh
       - name: PostgreSQL integration tests
-        run: node --test --test-concurrency=1 tests/integration/comment-reaction-pg.test.mjs tests/integration/user-levels-pg.test.mjs
+        run: node --test --test-concurrency=1 tests/integration/user-levels-pg.test.mjs tests/integration/multi-club-tenancy-pg.test.mjs tests/integration/usage-quotas-pg.test.mjs tests/integration/paused-club-cleanup-pg.test.mjs tests/integration/platform-developer-pg.test.mjs
         env:
           PG_TEST_URL: postgresql://postgres:postgres@postgres:5432/blacklight_test
           HG_TEST_DATABASE_RESET: 'yes'

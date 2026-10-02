@@ -4,9 +4,9 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const EXPECTED_MIGRATION_COUNT = 22;
+export const EXPECTED_MIGRATION_COUNT = 24;
 export const EXPECTED_BUSINESS_TABLE_COUNT = 27;
-export const EXPECTED_LATEST_MIGRATION = '20260927160000_user_levels.sql';
+export const EXPECTED_LATEST_MIGRATION = '20261003090000_platform_developer.sql';
 const MIGRATION_NAME = /^\d{14}_[a-z0-9_]+\.sql$/;
 
 export function sha256(value) {
@@ -45,6 +45,15 @@ export async function readMigrationSet() {
       const existing = tableMap.get(table);
       if (existing && JSON.stringify(existing.primaryKey) !== JSON.stringify(primaryKey)) {
         throw new Error(`conflicting primary key definitions for ${table}`);
+      }
+      tableMap.set(table, { name: table, primaryKey });
+    }
+    const alterPrimaryKey = /\bALTER\s+TABLE\s+(?:public\.)?([a-z][a-z0-9_]*)\s+ADD\s+PRIMARY\s+KEY\s*\(([^)]*)\)\s*;/gi;
+    for (const match of sql.matchAll(alterPrimaryKey)) {
+      const table = match[1];
+      const primaryKey = match[2].split(',').map((column) => column.trim().replace(/^"|"$/g, ''));
+      if (!tableMap.has(table) || primaryKey.length === 0) {
+        throw new Error(`could not apply primary key change for ${table} in ${name}`);
       }
       tableMap.set(table, { name: table, primaryKey });
     }

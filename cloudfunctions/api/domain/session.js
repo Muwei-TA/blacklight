@@ -1,6 +1,6 @@
 /** 会话与成员资格用例 */
 
-const { COLLECTIONS, MEMBER_STATUS, NOTIFY_TYPE, DEFAULT_CLUB_ID } = require('../shared/constants');
+const { COLLECTIONS, MEMBER_STATUS, NOTIFY_TYPE } = require('../shared/constants');
 const validators = require('../shared/validators');
 const presenters = require('../shared/presenters');
 const errors = require('../shared/errors');
@@ -17,12 +17,23 @@ async function me(payload, ctx) {
   });
 }
 
+/** Account bootstrap deliberately carries no selected community. */
+async function accountMe(payload, ctx) {
+  return presenters.presentSession({
+    viewer: ctx.viewer,
+    user: ctx.user,
+    capabilities: ctx.capabilities,
+    club: null,
+  });
+}
+
 /**
  * POST /membership/applications —— 提交入社申请
  * 有效邀请码在事务内直接激活普通成员；被移除成员仍走人工恢复。
  * 已提交成功的入社可安全重试，邀请码不会重复计次。
  */
 async function apply(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   if (!ctx.viewer.isAuthenticated) throw errors.unauthenticated();
 
   // 限频，防止暴力猜码
@@ -42,6 +53,7 @@ async function apply(payload, ctx) {
     return await store.rpc('hg_apply_membership', {
       p_actor_id: ctx.viewer.userId,
       p_input: { displayName, inviteCode: inviteCode.toUpperCase(), rulesVersion },
+      p_club_id: clubId,
     });
   } catch (error) {
     const marker = `${error && error.code ? error.code : ''} ${error && error.message ? error.message : ''}`;
@@ -61,11 +73,12 @@ async function apply(payload, ctx) {
 
 /** GET /membership/applications/mine —— 申请状态与理由 */
 async function myApplication(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   if (!ctx.viewer.isAuthenticated) throw errors.unauthenticated();
 
   const res = await db
-    .coll(COLLECTIONS.membershipApplications)
-    .where({ userId: ctx.viewer.userId, clubId: DEFAULT_CLUB_ID })
+    .coll(COLLECTIONS.membershipApplications, clubId)
+    .where({ userId: ctx.viewer.userId, clubId })
     .orderBy('createdAt', 'desc')
     .limit(1)
     .get()
@@ -84,12 +97,7 @@ async function updateProfile(payload, ctx) {
   if (payload.displayName !== undefined) data.displayName = validators.validateDisplayName(payload.displayName);
   if (payload.avatarAssetId !== undefined) {
     const assetId = validators.optionalId(payload.avatarAssetId, 'avatarAssetId');
-    if (assetId) {
-      const asset = await db.findOneById(COLLECTIONS.assets, assetId);
-      if (!asset || asset.ownerId !== ctx.viewer.userId) throw errors.forbidden({ reason: 'avatar owner mismatch' });
-      if (asset.status !== 'verified') throw errors.pendingMedia({ assetId });
-      data.avatar = asset.tempFileURL || '';
-    }
+    if (assetId) throw errors.forbidden({ reason: 'avatar upload disabled' });
   }
 
   await db.coll(COLLECTIONS.users).doc(ctx.viewer.userId).update({ data });
@@ -100,12 +108,13 @@ async function updateProfile(payload, ctx) {
 /** GET /me/profile —— 个人页统计。仅面向本人。 */
 async function myProfile(payload, ctx) {
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
+  const clubId = ctx.viewer.clubId;
   const _ = db.command();
 
   const [posts, bookmarks, topics] = await Promise.all([
-    db.coll(COLLECTIONS.posts).where({ ownerId: ctx.viewer.userId, status: _.neq('deleted') }).count(),
-    db.coll(COLLECTIONS.bookmarks).where({ userId: ctx.viewer.userId }).count(),
-    db.coll(COLLECTIONS.topicFollows).where({ userId: ctx.viewer.userId }).count(),
+    db.coll(COLLECTIONS.posts, clubId).where({ clubId, ownerId: ctx.viewer.userId, status: _.neq('deleted') }).count(),
+    db.coll(COLLECTIONS.bookmarks, clubId).where({ clubId, userId: ctx.viewer.userId }).count(),
+    db.coll(COLLECTIONS.topicFollows, clubId).where({ clubId, userId: ctx.viewer.userId }).count(),
   ]);
 
   return {
@@ -126,6 +135,7 @@ async function myProfile(payload, ctx) {
  * 避免与"调用者身份"混淆 —— 调用者身份只能来自 ctx.viewer。
  */
 async function publicProfile(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   const targetUserId = validators.requireId(payload.targetUserId, 'targetUserId');
   const posts = require('./posts');
   const where = posts.buildFeedWhere(ctx.viewer, {
@@ -138,17 +148,19 @@ async function publicProfile(payload, ctx) {
   const [user, membershipRes, page] = await Promise.all([
     db.findOneById(COLLECTIONS.users, targetUserId),
     db
-      .coll(COLLECTIONS.memberships)
-      .where({ userId: targetUserId, clubId: DEFAULT_CLUB_ID })
+      .coll(COLLECTIONS.memberships, clubId)
+      .where({ userId: targetUserId, clubId })
       .limit(1)
       .get()
       .catch(() => ({ data: [] })),
     db.paginate(COLLECTIONS.posts, where, {
       cursor: validators.parseCursor(payload.cursor),
       pageSize: validators.clampPageSize(payload.pageSize),
+      clubId,
     }),
   ]);
   if (!user) throw errors.notAccessible({ targetUserId });
+  if (!membershipRes.data || membershipRes.data.length === 0) throw errors.notAccessible({ targetUserId });
   const isActive = membershipRes.data && membershipRes.data[0] && membershipRes.data[0].status === MEMBER_STATUS.ACTIVE;
 
   const cards = await posts.hydrateCards(page.items, ctx);
@@ -175,11 +187,13 @@ async function requestExport(payload, ctx) {
     action: 'export.request',
     targetType: 'user',
     targetId: ctx.viewer.userId,
+    clubId: ctx.viewer.clubId,
   });
 
-  await db.coll(COLLECTIONS.notifications).add({
+  await db.coll(COLLECTIONS.notifications, ctx.viewer.clubId).add({
     data: {
       recipientId: ctx.viewer.userId,
+      clubId: ctx.viewer.clubId,
       eventType: NOTIFY_TYPE.SYSTEM_NOTICE,
       title: '导出任务已创建',
       summary: '完成后会在这里通知你。',
@@ -212,6 +226,7 @@ async function requestAccountDeletion(payload, ctx) {
 
 module.exports = {
   me,
+  accountMe,
   apply,
   myApplication,
   updateProfile,

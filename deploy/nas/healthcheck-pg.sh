@@ -9,4 +9,4 @@ relations="$(psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -A
 
 migration_count="$(psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atq \
   -c "SELECT count(*) FROM nas_meta.schema_migrations")"
-[ "$migration_count" = "22" ]
+[ "$migration_count" = "24" ]

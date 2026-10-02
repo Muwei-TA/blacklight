@@ -32,11 +32,13 @@ Module._load = originalLoad;
 
 const member = policies.buildViewer({
   userId: 'member-1',
+  clubId: constants.DEFAULT_CLUB_ID,
   role: constants.ROLE.MEMBER,
   memberStatus: constants.MEMBER_STATUS.ACTIVE,
 });
 const nonMember = policies.buildViewer({
   userId: 'guest-1',
+  clubId: constants.DEFAULT_CLUB_ID,
   role: constants.ROLE.GUEST,
   memberStatus: constants.MEMBER_STATUS.NONE,
 });
@@ -65,7 +67,7 @@ test('等级读取只使用服务端会话身份，不接收 payload 身份', as
   rpcResult = snapshot;
   const result = await levels.getMyLevels({ userId: 'forged-user', totalXp: 999999 }, { viewer: member });
   assert.deepEqual(result, snapshot);
-  assert.deepEqual(calls, [{ name: 'hg_user_levels_snapshot', args: { p_actor_id: 'member-1' } }]);
+  assert.deepEqual(calls, [{ name: 'hg_user_levels_snapshot', args: { p_actor_id: 'member-1', p_club_id: 'heiguang' } }]);
 });
 
 test('签到只提交服务端会话身份并返回快照与实际奖励', async () => {
@@ -74,7 +76,7 @@ test('签到只提交服务端会话身份并返回快照与实际奖励', async
   rpcResult = { ...snapshot, awardedXp: 0 };
   const result = await levels.checkIn({ userId: 'forged-user', date: '2099-01-01', xp: 500 }, { viewer: member });
   assert.equal(result.awardedXp, 0);
-  assert.deepEqual(calls, [{ name: 'hg_user_levels_check_in', args: { p_actor_id: 'member-1' } }]);
+  assert.deepEqual(calls, [{ name: 'hg_user_levels_check_in', args: { p_actor_id: 'member-1', p_club_id: 'heiguang' } }]);
 });
 
 test('访客与非成员不能读取等级或签到', async () => {

@@ -10,7 +10,7 @@
 
 const { AppError, KIND, MESSAGE_BY_KIND, serverError } = require('./errors');
 const { scrubForLog } = require('./anonymity');
-const { resolveContext } = require('./session');
+const { resolveContext, resolveDirectoryContext } = require('./session');
 const { DEFAULT_CLUB_ID } = require('./constants');
 
 /**
@@ -63,13 +63,18 @@ function createRouter(handlers, { name = 'api', identityResolver = null } = {}) 
       if (identity.invalid) {
         return { code: KIND.UNAUTHENTICATED, message: MESSAGE_BY_KIND[KIND.UNAUTHENTICATED], requestId };
       }
-      ctx = await resolveContext(identity.openid || null, event.clubId || DEFAULT_CLUB_ID);
+      ctx = (action.startsWith('platform/') || ['account/me', 'clubs/mine', 'clubs/list', 'me/account/delete'].includes(action))
+        ? await resolveDirectoryContext(identity.openid || null)
+        : await resolveContext(identity.openid || null, event.clubId === undefined ? DEFAULT_CLUB_ID : event.clubId);
       ctx.identityDiagnostic = identity.diagnostic || { source: 'nas-session', hasOpenid: !!identity.openid };
       ctx.requestId = requestId;
       ctx.action = action;
       ctx.now = Date.now();
     } catch (err) {
       console.error(`[${name}] context error`, { action, requestId, code: err.code || 'context_error' });
+      if (err instanceof AppError) {
+        return { code: err.kind, message: err.message, detail: err.detail || undefined, requestId };
+      }
       return { code: KIND.SERVER, message: MESSAGE_BY_KIND[KIND.SERVER], requestId };
     }
 

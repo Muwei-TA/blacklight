@@ -10,7 +10,9 @@
 
 const { COLLECTIONS, ROLE, MEMBER_STATUS, DEFAULT_CLUB_ID } = require('./constants');
 const { coll, findOneById, serverDate, command } = require('./db');
-const { buildViewer, GUEST_VIEWER } = require('./policies');
+const { buildViewer } = require('./policies');
+const errors = require('./errors');
+const validators = require('./validators');
 
 /** 能力开关默认全关。读取失败时保持关闭（fail-closed）。 */
 const DEFAULT_CAPABILITIES = {
@@ -55,18 +57,19 @@ async function resolveUser(openid) {
 
 async function resolveMembership(userId, clubId = DEFAULT_CLUB_ID) {
   if (!userId) return null;
-  const res = await coll(COLLECTIONS.memberships).where({ userId, clubId }).limit(1).get();
+  const res = await coll(COLLECTIONS.memberships, clubId).where({ userId, clubId }).limit(1).get();
   return res.data && res.data.length > 0 ? res.data[0] : null;
 }
 
-/** 社团配置与能力开关。单社团首版只有一条记录。 */
+/** 社团配置与能力开关。未知/停用社团没有默认兜底。 */
 async function loadClubConfig(clubId = DEFAULT_CLUB_ID) {
-  const doc = await findOneById(COLLECTIONS.clubConfig, clubId);
-  if (!doc) {
-    return { clubId, name: '黑光文学社', capabilities: { ...DEFAULT_CAPABILITIES } };
+  const doc = await findOneById(COLLECTIONS.clubConfig, clubId, clubId);
+  if (!doc || (doc.status || (doc._id === DEFAULT_CLUB_ID ? 'active' : 'paused')) !== 'active') {
+    throw errors.notAccessible({ clubId });
   }
   return {
     ...doc,
+    clubId: doc.clubId || doc._id,
     capabilities: { ...DEFAULT_CAPABILITIES, ...(doc.capabilities || {}) },
   };
 }
@@ -76,27 +79,42 @@ async function loadClubConfig(clubId = DEFAULT_CLUB_ID) {
  * @returns {{ viewer, user, membership, club, capabilities }}
  */
 async function resolveContext(openid, clubId = DEFAULT_CLUB_ID) {
+  const requestedClubId = validators.requireId(clubId, 'clubId');
   // 社团配置与用户解析互不依赖：并行取回，缩短每个请求的固定串行开销
   const [club, user] = await Promise.all([
-    loadClubConfig(clubId),
+    loadClubConfig(requestedClubId),
     openid ? resolveUser(openid) : null,
   ]);
   const capabilities = club.capabilities;
 
   if (!user || user.status !== 'active') {
-    return { viewer: GUEST_VIEWER, user: null, membership: null, club, capabilities };
+    return { viewer: buildViewer({ clubId: requestedClubId }), user: null, membership: null, club, capabilities };
   }
 
-  const membership = await resolveMembership(user._id, clubId);
+  const membership = await resolveMembership(user._id, requestedClubId);
   const viewer = buildViewer({
     userId: user._id,
+    platformRole: user.platformRole,
     role: membership ? membership.role || ROLE.MEMBER : ROLE.GUEST,
     memberStatus: membership ? membership.status : MEMBER_STATUS.NONE,
-    clubId,
+    clubId: requestedClubId,
     mutedUntil: membership ? membership.mutedUntil || null : null,
   });
 
   return { viewer, user, membership, club, capabilities };
+}
+
+/** Account-wide context used only by the club directory actions. */
+async function resolveDirectoryContext(openid) {
+  const user = openid ? await resolveUser(openid) : null;
+  const activeUser = user && user.status === 'active' ? user : null;
+  return {
+    viewer: buildViewer({ userId: activeUser ? activeUser._id : null, platformRole: activeUser ? activeUser.platformRole : 'none', clubId: null }),
+    user: activeUser,
+    membership: null,
+    club: null,
+    capabilities: { ...DEFAULT_CAPABILITIES },
+  };
 }
 
 /**
@@ -134,5 +152,6 @@ module.exports = {
   resolveMembership,
   loadClubConfig,
   resolveContext,
+  resolveDirectoryContext,
   checkRateLimit,
 };

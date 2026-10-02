@@ -17,7 +17,6 @@ const {
   BOARD_STATUS,
   MEMBER_STATUS,
   VISIBILITY,
-  DEFAULT_CLUB_ID,
 } = require('../shared/constants');
 const policies = require('../shared/policies');
 const validators = require('../shared/validators');
@@ -59,6 +58,7 @@ function compareQueueItems(left, right) {
 }
 
 async function listManualContentQueue(cursor, pageSize, ctx, internal, includeEqualId) {
+  const clubId = ctx.viewer.clubId;
   let taskCursor = cursor;
   let includeEqual = includeEqualId;
   let hasMoreTasks = true;
@@ -69,18 +69,18 @@ async function listManualContentQueue(cursor, pageSize, ctx, internal, includeEq
   while (hasMoreTasks && candidates.length <= pageSize) {
     const page = await db.paginate(
       COLLECTIONS.reviewTasks,
-      { targetType: 'post', status: REVIEW_TASK_STATUS.MANUAL },
-      { cursor: taskCursor, pageSize, order: 'asc', includeEqualId: includeEqual },
+      { clubId, targetType: 'post', status: REVIEW_TASK_STATUS.MANUAL },
+      { cursor: taskCursor, pageSize, order: 'asc', includeEqualId: includeEqual, clubId },
     );
     if (page.items.length === 0) break;
 
-    const posts = await db.findByIds(COLLECTIONS.posts, page.items.map((task) => task.targetId));
+    const posts = await db.findByIds(COLLECTIONS.posts, page.items.map((task) => task.targetId), clubId);
     const postById = new Map(posts.map((post) => [post._id, post]));
     for (const task of page.items) {
       const post = postById.get(task.targetId);
       if (!post
         || task.status !== REVIEW_TASK_STATUS.MANUAL
-        || post.clubId !== DEFAULT_CLUB_ID
+        || post.clubId !== clubId
         || post.status !== POST_STATUS.PENDING
         || ![VISIBILITY.PUBLIC, VISIBILITY.CLUB].includes(post.visibility)
         || Number(task.postVersion || 1) !== Number(post.version || 1)) continue;
@@ -118,6 +118,7 @@ async function listManualContentQueue(cursor, pageSize, ctx, internal, includeEq
 }
 
 async function listVisibleCollectionQueue(cursor, pageSize, ctx, internal, includeEqualId) {
+  const clubId = ctx.viewer.clubId;
   let taskCursor = cursor;
   let includeEqual = includeEqualId;
   let hasMoreTasks = true;
@@ -128,16 +129,16 @@ async function listVisibleCollectionQueue(cursor, pageSize, ctx, internal, inclu
   while (hasMoreTasks && candidates.length <= pageSize) {
     const page = await db.paginate(
       COLLECTIONS.reviewTasks,
-      { targetType: 'collection_submission', status: 'queued' },
-      { cursor: taskCursor, pageSize, order: 'asc', includeEqualId: includeEqual },
+      { clubId, targetType: 'collection_submission', status: 'queued' },
+      { cursor: taskCursor, pageSize, order: 'asc', includeEqualId: includeEqual, clubId },
     );
     if (page.items.length === 0) break;
 
-    const posts = await db.findByIds(COLLECTIONS.posts, page.items.map((task) => task.targetId));
+    const posts = await db.findByIds(COLLECTIONS.posts, page.items.map((task) => task.targetId), clubId);
     const postById = new Map(posts.map((post) => [post._id, post]));
     for (const task of page.items) {
       const post = postById.get(task.targetId);
-      if (!post || post.clubId !== DEFAULT_CLUB_ID || post.status !== POST_STATUS.PUBLISHED
+      if (!post || post.clubId !== clubId || post.status !== POST_STATUS.PUBLISHED
         || ![VISIBILITY.PUBLIC, VISIBILITY.CLUB].includes(post.visibility)) continue;
 
       candidates.push(makeQueueItem({
@@ -226,6 +227,7 @@ async function callModeration(action, input, ctx) {
       p_action: action,
       p_actor_id: ctx.viewer.userId,
       p_input: input,
+      p_club_id: ctx.viewer.clubId,
     });
   } catch (error) {
     const mapped = mapModerationError(error);
@@ -239,6 +241,7 @@ async function callBoardModeration(input, ctx) {
     return await db.getDb().rpc('hg_decide_board', {
       p_actor_id: ctx.viewer.userId,
       p_input: input,
+      p_club_id: ctx.viewer.clubId,
     });
   } catch (error) {
     const marker = `${error && error.code ? error.code : ''} ${error && error.message ? error.message : ''}`;
@@ -255,6 +258,7 @@ async function callBoardModeration(input, ctx) {
 /** GET /admin/queues/{queue} */
 async function listQueue(payload, ctx, internal = false) {
   if (!policies.canAccessModeration(ctx.viewer)) throw errors.forbidden({ reason: 'not moderator' });
+  const clubId = ctx.viewer.clubId;
 
   const queue = validators.requireEnum(payload.queue || 'content', 'queue', QUEUES);
   const cursor = validators.parseCursor(payload.cursor);
@@ -275,6 +279,7 @@ async function listQueue(payload, ctx, internal = false) {
       p_actor: ctx.viewer.userId,
       p_cursor: cursor ? { ...cursor, inclusiveId: includeEqualId } : null,
       p_limit: pageSize + 1,
+      p_club_id: clubId,
     });
     const items = rows.slice(0, pageSize);
     return { items: items.map((comment) => makeQueueItem({
@@ -288,8 +293,8 @@ async function listQueue(payload, ctx, internal = false) {
   if (queue === 'topic') {
     const { items, hasMore } = await db.paginate(
       COLLECTIONS.topics,
-      { clubId: DEFAULT_CLUB_ID, status: TOPIC_STATUS.PENDING },
-      { cursor, pageSize, order: 'asc', includeEqualId },
+      { clubId, status: TOPIC_STATUS.PENDING },
+      { cursor, pageSize, order: 'asc', includeEqualId, clubId },
     );
     return {
       items: items.map((topic) => makeQueueItem({
@@ -308,8 +313,8 @@ async function listQueue(payload, ctx, internal = false) {
   if (queue === 'board') {
     const { items, hasMore } = await db.paginate(
       COLLECTIONS.boards,
-      { clubId: DEFAULT_CLUB_ID, status: BOARD_STATUS.PENDING },
-      { cursor, pageSize, order: 'asc', includeEqualId },
+      { clubId, status: BOARD_STATUS.PENDING },
+      { cursor, pageSize, order: 'asc', includeEqualId, clubId },
     );
     return {
       items: items.map((board) => makeQueueItem({
@@ -329,8 +334,8 @@ async function listQueue(payload, ctx, internal = false) {
   if (queue === 'member') {
     const { items, hasMore } = await db.paginate(
       COLLECTIONS.membershipApplications,
-      { clubId: DEFAULT_CLUB_ID, status: MEMBER_STATUS.PENDING },
-      { cursor, pageSize, order: 'asc', includeEqualId },
+      { clubId, status: MEMBER_STATUS.PENDING },
+      { cursor, pageSize, order: 'asc', includeEqualId, clubId },
     );
     return {
       items: items.map((app) => makeQueueItem({
@@ -349,8 +354,8 @@ async function listQueue(payload, ctx, internal = false) {
   if (queue === 'report') {
     const { items, hasMore } = await db.paginate(
       COLLECTIONS.reports,
-      { status: 'received' },
-      { cursor, pageSize, order: 'asc', includeEqualId },
+      { clubId, status: 'received' },
+      { cursor, pageSize, order: 'asc', includeEqualId, clubId },
     );
     return {
       items: items.map((report) => makeQueueItem({
@@ -374,6 +379,7 @@ async function listQueue(payload, ctx, internal = false) {
       p_actor: ctx.viewer.userId,
       p_cursor: cursor ? { ...cursor, inclusiveId: includeEqualId } : null,
       p_limit: pageSize + 1,
+      p_club_id: clubId,
     });
     const appeals = Array.isArray(rows) ? rows : [];
     const items = appeals.slice(0, pageSize);
@@ -522,11 +528,12 @@ async function revealAnonymous(payload, ctx) {
     targetType: 'thread',
     targetId: threadId,
     reason,
+    clubId: ctx.viewer.clubId,
   });
 
   const res = await db
-    .coll(COLLECTIONS.anonymousIdentities)
-    .where({ threadId })
+    .coll(COLLECTIONS.anonymousIdentities, ctx.viewer.clubId)
+    .where({ clubId: ctx.viewer.clubId, threadId })
     .limit(50)
     .get()
     .catch(() => ({ data: [] }));

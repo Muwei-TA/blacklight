@@ -19,6 +19,7 @@ const REPLY_TYPES = [NOTIFY_TYPE.COMMENT, NOTIFY_TYPE.REPLY, NOTIFY_TYPE.REACTIO
 /** GET /notifications */
 async function list(payload, ctx) {
   if (!ctx.viewer.isAuthenticated) throw errors.unauthenticated();
+  const clubId = ctx.viewer.clubId;
 
   const tab = validators.requireEnum(payload.tab || 'reply', 'tab', ['reply', 'system']);
   const cursor = validators.parseCursor(payload.cursor);
@@ -27,16 +28,17 @@ async function list(payload, ctx) {
 
   const where = {
     recipientId: ctx.viewer.userId,
+    clubId,
     eventType: tab === 'reply' ? _.in(REPLY_TYPES) : _.nin(REPLY_TYPES),
   };
 
   if (!policies.canAccessModeration(ctx.viewer)) where.targetType = _.nin(ADMIN_TARGETS);
 
-  const { items, hasMore } = await db.paginate(COLLECTIONS.notifications, where, { cursor, pageSize });
+  const { items, hasMore } = await db.paginate(COLLECTIONS.notifications, where, { cursor, pageSize, clubId });
 
   // 复核每条通知指向的内容是否仍可访问
   const postIds = items.filter((n) => n.targetType === 'post').map((n) => n.targetId);
-  const posts = await db.findByIds(COLLECTIONS.posts, postIds);
+  const posts = await db.findByIds(COLLECTIONS.posts, postIds, clubId);
   const postById = new Map(posts.map((p) => [p._id, p]));
 
   const dtos = items.map((notification) => {
@@ -56,10 +58,11 @@ async function list(payload, ctx) {
 /** POST /notifications/read-all —— 只更新本人状态 */
 async function markAllRead(payload, ctx) {
   if (!ctx.viewer.isAuthenticated) throw errors.unauthenticated();
+  const clubId = ctx.viewer.clubId;
 
   await db
-    .coll(COLLECTIONS.notifications)
-    .where({ recipientId: ctx.viewer.userId, readAt: null })
+    .coll(COLLECTIONS.notifications, clubId)
+    .where({ recipientId: ctx.viewer.userId, clubId, readAt: null })
     .update({ data: { readAt: db.serverDate() } })
     .catch(() => {});
 
@@ -69,12 +72,13 @@ async function markAllRead(payload, ctx) {
 /** GET /notifications/unread-count */
 async function unreadCount(payload, ctx) {
   if (!ctx.viewer.isAuthenticated) return { count: 0 };
+  const clubId = ctx.viewer.clubId;
 
-  const where = { recipientId: ctx.viewer.userId, readAt: null };
+  const where = { recipientId: ctx.viewer.userId, clubId, readAt: null };
   if (!policies.canAccessModeration(ctx.viewer)) where.targetType = db.command().nin(ADMIN_TARGETS);
 
   const res = await db
-    .coll(COLLECTIONS.notifications)
+    .coll(COLLECTIONS.notifications, clubId)
     .where(where)
     .count()
     .catch(() => ({ total: 0 }));

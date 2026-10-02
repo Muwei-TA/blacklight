@@ -16,7 +16,6 @@ const {
   ASSET_STATUS,
   REVIEW_TASK_STATUS,
   CONTENT_LIMITS,
-  DEFAULT_CLUB_ID,
 } = require('../shared/constants');
 const db = require('../shared/db');
 const usage = require('../shared/usage');
@@ -72,7 +71,8 @@ async function verifyFileMetadata(asset) {
 }
 
 /** 图片内容检查：同步返回，可直接闭环 */
-async function checkImage(buffer, clubId = DEFAULT_CLUB_ID) {
+async function checkImage(buffer, clubId) {
+  if (!clubId) throw new Error('asset club is required');
   await usage.reserveReviewCall('image', clubId);
   try {
     await wechat.imgSecCheck({
@@ -87,8 +87,9 @@ async function checkImage(buffer, clubId = DEFAULT_CLUB_ID) {
 }
 
 async function processAsset(task) {
-  const asset = await db.findOneById(COLLECTIONS.assets, task.targetId);
+  const asset = await db.findOneById(COLLECTIONS.assets, task.targetId, task.clubId);
   if (!asset) return { status: REVIEW_TASK_STATUS.PASSED, note: 'asset gone' };
+  if (asset.clubId !== task.clubId) return { status: REVIEW_TASK_STATUS.MANUAL, note: 'asset club mismatch' };
   if (asset.status === ASSET_STATUS.VERIFIED || asset.status === ASSET_STATUS.REJECTED) {
     return { status: REVIEW_TASK_STATUS.PASSED, note: `already ${asset.status}` };
   }
@@ -126,7 +127,7 @@ async function processAsset(task) {
   if (asset.mediaType === 'image') {
     let result;
     try {
-      result = await checkImage(meta.buffer, asset.clubId || DEFAULT_CLUB_ID);
+      result = await checkImage(meta.buffer, asset.clubId);
     } catch (error) {
       const waiting = usage.waitingForQuota(error);
       if (waiting) return waiting;
@@ -137,7 +138,7 @@ async function processAsset(task) {
       return { status: REVIEW_TASK_STATUS.FAILED, note: 'image blocked' };
     }
 
-    await db.coll(COLLECTIONS.assets).where({ _id: asset._id, status: asset.status, fileId: asset.fileId }).update({
+    await db.coll(COLLECTIONS.assets, asset.clubId).where({ clubId: asset.clubId, _id: asset._id, status: asset.status, fileId: asset.fileId }).update({
       data: {
         status: ASSET_STATUS.VERIFIED,
         tempFileURL: '',
@@ -158,7 +159,7 @@ async function processAsset(task) {
 }
 
 async function markRejected(asset, reason) {
-  await db.coll(COLLECTIONS.assets).where({ _id: asset._id, status: asset.status, fileId: asset.fileId }).update({
+  await db.coll(COLLECTIONS.assets, asset.clubId).where({ clubId: asset.clubId, _id: asset._id, status: asset.status, fileId: asset.fileId }).update({
     data: {
       status: ASSET_STATUS.REJECTED,
       failureReason: reason,

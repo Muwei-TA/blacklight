@@ -2,10 +2,10 @@
  * not a failed review attempt; callers must keep the task queued until next UTC day.
  */
 
-const { DEFAULT_CLUB_ID } = require('./constants');
 const db = require('./db');
 
-async function reserveReviewCall(kind, clubId = DEFAULT_CLUB_ID) {
+async function reserveReviewCall(kind, clubId) {
+  if (!clubId) throw new Error('review quota club is required');
   const store = db.getDb();
   if (!store || typeof store.rpc !== 'function') throw new Error('usage quota RPC is not configured');
   const result = await store.rpc('hg_usage_reserve_review_call', {

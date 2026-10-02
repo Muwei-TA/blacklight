@@ -118,7 +118,7 @@ const CONTENT_LIMITS = {
   maxPageSize: 50,
 };
 
-/** 首版单社团。保留 clubId 便于边界测试，但不建设多租户。 */
+/** Existing club remains the compatibility default for unscoped legacy clients. */
 const DEFAULT_CLUB_ID = 'heiguang';
 
 module.exports = {

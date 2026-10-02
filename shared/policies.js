@@ -14,6 +14,12 @@
 
 const { VISIBILITY, POST_STATUS, ROLE, MEMBER_STATUS, TOPIC_STATUS, BOARD_STATUS, DEFAULT_CLUB_ID } = require('./constants');
 
+function sameClub(viewer, item) {
+  if (!viewer || !item || typeof viewer.clubId !== 'string') return false;
+  const itemClubId = item.clubId || (viewer.clubId === DEFAULT_CLUB_ID ? DEFAULT_CLUB_ID : null);
+  return viewer.clubId === itemClubId;
+}
+
 /**
  * 构造访问者上下文。唯一合法的 viewer 来源。
  * @param {object} params
@@ -28,10 +34,13 @@ function buildViewer({
   memberStatus = MEMBER_STATUS.NONE,
   clubId = null,
   mutedUntil = null,
+  platformRole = 'none',
 } = {}) {
   const isActiveMember = memberStatus === MEMBER_STATUS.ACTIVE;
   return Object.freeze({
     userId,
+    platformRole: userId && platformRole === 'developer' ? 'developer' : 'none',
+    isDeveloper: !!userId && platformRole === 'developer',
     // 成员资格撤销后立即失去社内读写权，因此 role 也随 memberStatus 降级
     role: isActiveMember ? role : ROLE.GUEST,
     rawRole: role,
@@ -49,7 +58,7 @@ const GUEST_VIEWER = buildViewer({});
 
 /** 是否为内容作者。只接受服务端读出的 post.ownerId。 */
 function isOwner(viewer, post) {
-  return !!viewer.userId && !!post && post.ownerId === viewer.userId;
+  return sameClub(viewer, post) && !!viewer.userId && post.ownerId === viewer.userId;
 }
 
 /**
@@ -57,7 +66,7 @@ function isOwner(viewer, post) {
  * @returns {boolean}
  */
 function canReadPost(viewer, post) {
-  if (!post) return false;
+  if (!sameClub(viewer, post)) return false;
   // Private content never acquires an administrator exception, including hidden records.
   if (post.visibility === VISIBILITY.PRIVATE && !isOwner(viewer, post)) return false;
 
@@ -128,7 +137,7 @@ const VISIBILITY_RANK = {
  * 管理员也不能代作者扩大范围。
  */
 function canChangeVisibility(viewer, post, nextVisibility) {
-  if (!post) return false;
+  if (!sameClub(viewer, post)) return false;
   if (!isOwner(viewer, post)) return false;
   const current = VISIBILITY_RANK[post.visibility];
   const next = VISIBILITY_RANK[nextVisibility];
@@ -138,14 +147,14 @@ function canChangeVisibility(viewer, post, nextVisibility) {
 
 /** 作者可删自己的内容；管理员走隐藏流程，不使用删除 */
 function canDeletePost(viewer, post) {
-  if (!post) return false;
+  if (!sameClub(viewer, post)) return false;
   if (post.status === POST_STATUS.DELETED) return false;
   return isOwner(viewer, post);
 }
 
 /** 评论者可删自己的回应；管理员走隐藏流程，不使用删除。待审/已发布均可删。 */
 function canDeleteComment(viewer, comment) {
-  if (!comment) return false;
+  if (!sameClub(viewer, comment)) return false;
   if (comment.status === POST_STATUS.DELETED) return false;
   return !!viewer.userId && comment.ownerId === viewer.userId;
 }
@@ -196,7 +205,7 @@ function canManageTargetMember(viewer, targetUserId) {
 
 /** 申诉只允许作者对自己被隐藏/退回的内容发起。 */
 function canSubmitAppeal(viewer, post) {
-  if (!viewer || !post || !viewer.userId || post.ownerId !== viewer.userId) return false;
+  if (!sameClub(viewer, post) || !viewer.userId || post.ownerId !== viewer.userId) return false;
   return post.status === POST_STATUS.HIDDEN || post.status === POST_STATUS.REJECTED;
 }
 
@@ -222,7 +231,7 @@ function canUploadVideo(viewer, capabilities) {
 
 /** 话题可见性：待审话题只有提交者与管理员可见；归档话题可读不可投稿 */
 function canReadTopic(viewer, topic) {
-  if (!topic) return false;
+  if (!sameClub(viewer, topic)) return false;
   if (topic.status === TOPIC_STATUS.PENDING) {
     return (!!viewer.userId && topic.ownerId === viewer.userId) || viewer.isAdmin;
   }
@@ -237,8 +246,7 @@ function canPostToTopic(viewer, topic) {
 
 /** Boards are club-only. Pending/rejected boards are visible only to their owner and moderators. */
 function canReadBoard(viewer, board) {
-  if (!board) return false;
-  if (board.clubId !== DEFAULT_CLUB_ID) return false;
+  if (!sameClub(viewer, board)) return false;
   if (board.status === BOARD_STATUS.ACTIVE) return viewer.isMember;
   if (board.status === BOARD_STATUS.PENDING || board.status === BOARD_STATUS.REJECTED) {
     return (!!viewer.userId && board.ownerId === viewer.userId) || viewer.isAdmin;
@@ -247,13 +255,13 @@ function canReadBoard(viewer, board) {
 }
 
 function canPostToBoard(viewer, board, capabilities) {
-  return !!(board && board.status === BOARD_STATUS.ACTIVE
+  return !!(sameClub(viewer, board) && board.status === BOARD_STATUS.ACTIVE
     && canUsePublishing(viewer, capabilities));
 }
 
 /** 文集：社内文集仅成员可见；公开文集所有人可见 */
 function canReadCollection(viewer, collection) {
-  if (!collection) return false;
+  if (!sameClub(viewer, collection)) return false;
   if (collection.visibility === VISIBILITY.PUBLIC) return true;
   return viewer.isMember;
 }
@@ -264,6 +272,9 @@ function canReadCollection(viewer, collection) {
  */
 function canIncludeInCollection(collection, post) {
   if (!collection || !post) return false;
+  const collectionClubId = collection.clubId || DEFAULT_CLUB_ID;
+  const postClubId = post.clubId || DEFAULT_CLUB_ID;
+  if (collectionClubId !== postClubId) return false;
   if (post.status !== POST_STATUS.PUBLISHED) return false;
   if (post.visibility === VISIBILITY.PRIVATE) return false;
   // 文集受众不得超过原文受众

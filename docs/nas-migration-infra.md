@@ -2,6 +2,8 @@
 
 本目录为 NAS 自托管 PostgreSQL、API、worker 和私有图片文件提供 Compose 基础。CloudBase 云函数不属于 API/worker 的运行时依赖。当前 Compose 运行 Node 22、`npm start`、`npm run worker`，以及健康接口 `GET /v1/health`。`POST /v1/review/callback` 在 NAS 上明确返回 `503 feature_disabled`：当前没有可验证的微信来源签名或可信回调入口，不能让普通 HTTP 请求改变审核状态；等待该回调的旧图片任务保持不可公开。
 
+媒体授权按运行时区分：NAS 媒体路由在每个签名请求中重新读取资产与所属社团，复核当前成员资格、帖子可读权限及权限版本。CloudBase 兼容路径仍在 API 检查后调用 `getTempFileURL`，返回的平台临时链接在过期前可能继续有效；这条路径不具备 NAS 路由的逐请求即时撤权保证。本分支不为 CloudBase 另建媒体代理，不能把两种运行时描述为相同的撤权时效。
+
 ## 网络和持久化路径
 
 - NAS 数据根目录：`/vol1/docker/blacklight-nas-data`。
@@ -34,16 +36,20 @@ Compose 镜像基础为 `postgres:16-bookworm` 与 `node:22-bookworm-slim`。Pos
 
 1. 创建本地 `anon`、`authenticated`、`service_role` 角色和 `blacklight_app` 登录角色；`blacklight_app` 继承 `service_role` 权限并绕过 RLS。客户端角色仍没有表或 RPC 权限。
 2. 提供仅供 `hg_runtime_role()` 诊断函数使用的 `auth.role()` 兼容实现。
-3. 按文件名应用当前全部 22 个 CloudBase migration，并把文件名和 SHA-256 写入受限的 `nas_meta.schema_migrations`。遇到 checksum 不一致或已有迁移数异常时停止。
+3. 按文件名应用当前全部 24 个 CloudBase migration，并把文件名和 SHA-256 写入受限的 `nas_meta.schema_migrations`。遇到 checksum 不一致或已有迁移数异常时停止。
 4. 在迁移之后创建 NAS 本地会话表 `hg_sessions`。`token_hash` 是唯一 token 字段；不存明文会话 token。该表只授予 `service_role`。
 
-数据库健康检查同时要求 `nas_meta.schema_migrations` 恰有 22 行及 `public.hg_sessions` 存在。因此 `pg_isready` 单独成功不会让未完成迁移的空库显示 healthy。如第一次启动迁移中断，重启数据库后可再次运行容器内 `/usr/local/bin/local-apply-migrations`；迁移 ledger 允许安全续跑。不要清空已有 `pgdata` 来掩盖 migration 错误。
+数据库健康检查同时要求 `nas_meta.schema_migrations` 恰有 24 行及 `public.hg_sessions` 存在。因此 `pg_isready` 单独成功不会让未完成迁移的空库显示 healthy。如第一次启动迁移中断，重启数据库后可再次运行容器内 `/usr/local/bin/local-apply-migrations`；迁移 ledger 允许安全续跑。不要清空已有 `pgdata` 来掩盖 migration 错误。
 
-截至 2026-10-02 的只读核对，CloudBase PG 最新 migration 为 `20260927160000_user_levels`，共有 22 个 migration 和 27 张业务表。NAS 现有数据库包含数据，快照导入只能指向新的 stage 数据根。此只读状态不代表已导出或导入真实快照。
+截至 2026-10-02 的只读核对记录了旧状态：`20260927160000_user_levels` 是当时的最新 migration，数据库有 22 个 migration 和 27 张业务表。多社团工作分支现在依次追加 `20261002090000_multi_club_tenancy` 和 `20261003090000_platform_developer`，源码清单预期 24 个 migration；本段历史核对不证明 CloudBase 或 NAS 已应用它。22-migration 快照会因迁移指纹不匹配而被拒绝；如需恢复旧快照，先用对应的 22-migration 源码恢复，再按顺序应用新增 migration 并生成新的 24-migration 快照，不能略过校验或改写旧 migration checksum。
+
+22-migration 快照不能直接导入当前 24-migration 数据库，因为快照指纹和完整 migration 清单必须完全匹配。升级旧快照时，先使用与该快照指纹完全一致的 22-migration 源码建立隔离数据库并导入；核对行数和媒体后，再切到当前源码，按顺序追加 `20261002090000_multi_club_tenancy.sql`、`20261003090000_platform_developer.sql` 两个迁移，并分别记录原始 SHA-256。验证新 schema 后，从升级后的数据导出新的 24-migration 快照，再导入到全新 24-migration stage。不要改写旧 migration、伪造 ledger 项，或把 22-migration 快照直接灌入新 schema。
+
+社团角色契约：受控创建脚本为已有活跃用户创建首个 `moderator` membership，社团默认不公开。`moderator` 负责成员名册、成员角色/状态和邀请码；`admin` 与 `moderator` 都保留内容审核权限。成员治理和账号注销的最后管理者保护只计算活跃 `moderator`，不能把 `admin` 计入，否则会留下一个无法管理成员或邀请的社团。
 
 ## 从 CloudBase 导出完整快照
 
-`scripts/local-export-cloudbase.mjs` 通过 CloudBase PG JS SDK 导出全部 27 张业务表和 `blacklight-private` Bucket 下 `private/image/` 的所有对象。它会拒绝少于或多于预期的 22 个 migration、最新版本不符或表清单不是 27 张；逐表读取并复核行数，记录 JSONL SHA-256 和 migration 指纹。图片保持 `pgstore://blacklight-private/<objectKey>` ID，导出 `fileId → relativePath/SHA-256/size` 索引。每个数据库引用都必须在完整 Bucket 列表中找到。脚本不依赖 CloudBase `pg_dump`。
+`scripts/local-export-cloudbase.mjs` 通过 CloudBase PG JS SDK 导出全部 27 张业务表和 `blacklight-private` Bucket 下 `private/image/` 的所有对象。它会拒绝少于或多于预期的 24 个 migration、最新版本不符或表清单不是 27 张；逐表读取并复核行数，记录 JSONL SHA-256 和 migration 指纹。图片保持 `pgstore://blacklight-private/<objectKey>` ID，导出 `fileId → relativePath/SHA-256/size` 索引。每个数据库引用都必须在完整 Bucket 列表中找到。脚本不依赖 CloudBase `pg_dump`。
 
 在可信开发机的后端仓库执行。先再次确认 CloudBase PG 可读，并暂停 CloudBase API、worker、定时任务和任何会写库或改图片的入口，直到导出完成；使用 CloudBase 服务端 API Key（`service_role`）权限，将密钥放在权限为 `0600` 的单独文件中。不要把密钥粘进 shell 命令、`.env` 或聊天。
 
@@ -71,7 +77,7 @@ node scripts/local-import-snapshot.mjs --writes-paused --verify-only \
 
 ## 导入到 NAS
 
-先将完整快照复制到新的 stage 数据根，例如 `/vol1/docker/blacklight-nas-stage/imports/<snapshot-id>`，保持目录 `0700`、文件 `0600`。导入器核对目标端 22 个 migration 文件名与 SHA、28 张预期 public 表的完整清单、`hg_sessions` 为空，并拒绝任何已有业务行或非默认配置。现有 NAS 目标库不是导入目标；目标库必须从全新数据根初始化。
+先将完整快照复制到新的 stage 数据根，例如 `/vol1/docker/blacklight-nas-stage/imports/<snapshot-id>`，保持目录 `0700`、文件 `0600`。导入器核对目标端 24 个 migration 文件名与 SHA、28 张预期 public 表的完整清单、`hg_sessions` 为空，并拒绝任何已有业务行或非默认配置。现有 NAS 目标库不是导入目标；目标库必须从全新数据根初始化。
 
 并行验收使用独立配置，例如：
 
@@ -152,7 +158,7 @@ docker compose --project-directory "$PWD" --env-file "$NAS_DATA_ROOT/.env" \
 
 ## 切换门槛与当前验收边界
 
-- 旧 NAS 分支的 19-migration 回放结果只适用于当时的 schema。当前 22 个 migration 需要在新隔离工作树/新数据根重新验证。
+- 旧 NAS 分支的 19-migration 回放结果只适用于当时的 schema。当前源码有 24 个 migration，需要在新隔离工作树/新数据根重新验证。
 - 本机临时 PostgreSQL 16 的备份/恢复演练已用合成数据跑通：`hg_users` 一行、图片引用一条、私有媒体文件 28 字节；生成的 `pg_dump` 和媒体 tar 均恢复并校验通过。该测试证明本地备份工具链有效，不代表真实用户数据已迁入 NAS。
 - 本轮没有执行 CloudBase 导出或 NAS 导入，真实快照、receipt、NAS 备份及恢复演练仍待实际迁移时完成。
 - 现有 NAS 数据库包含业务行；当前实施保留该栈并要求全新 stage 数据根，快照导入器还会校验全部 28 张 public 表并拒绝已有行。

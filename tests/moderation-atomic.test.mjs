@@ -65,6 +65,7 @@ Module._load = originalLoad;
 
 const moderator = rootPolicies.buildViewer({
   userId: 'u_mod',
+  clubId: rootConstants.DEFAULT_CLUB_ID,
   role: rootConstants.ROLE.MODERATOR,
   memberStatus: rootConstants.MEMBER_STATUS.ACTIVE,
 });
@@ -118,6 +119,7 @@ test('评论奖励遇到成员资格并发更新时以可重试冲突返回', as
 test('普通成员不能调用原子管理决定', async () => {
   const member = rootPolicies.buildViewer({
     userId: 'u_member',
+    clubId: rootConstants.DEFAULT_CLUB_ID,
     role: rootConstants.ROLE.MEMBER,
     memberStatus: rootConstants.MEMBER_STATUS.ACTIVE,
   });

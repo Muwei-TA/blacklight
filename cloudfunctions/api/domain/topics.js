@@ -1,6 +1,6 @@
 /** 话题领域用例 */
 
-const { COLLECTIONS, TOPIC_STATUS, DEFAULT_CLUB_ID } = require('../shared/constants');
+const { COLLECTIONS, TOPIC_STATUS } = require('../shared/constants');
 const policies = require('../shared/policies');
 const validators = require('../shared/validators');
 const presenters = require('../shared/presenters');
@@ -18,11 +18,12 @@ const CATEGORY_TEXT = {
 
 /** GET /topics */
 async function list(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   const cursor = validators.parseCursor(payload.cursor);
   const pageSize = validators.clampPageSize(payload.pageSize);
   const _ = db.command();
 
-  const where = { clubId: DEFAULT_CLUB_ID };
+  const where = { clubId };
   if (payload.category && payload.category !== 'all') {
     where.category = validators.requireString(payload.category, 'category', { max: 20 });
   }
@@ -40,12 +41,12 @@ async function list(payload, ctx) {
     return { items: [], nextCursor: null };
   }
 
-  const { items, hasMore } = await db.paginate(COLLECTIONS.topics, where, { cursor, pageSize });
+  const { items, hasMore } = await db.paginate(COLLECTIONS.topics, where, { cursor, pageSize, clubId });
 
   const follows = ctx.viewer.userId
     ? await db
-        .coll(COLLECTIONS.topicFollows)
-        .where({ userId: ctx.viewer.userId, topicId: _.in(items.map((t) => t._id)) })
+        .coll(COLLECTIONS.topicFollows, clubId)
+        .where({ userId: ctx.viewer.userId, clubId, topicId: _.in(items.map((t) => t._id)) })
         .limit(items.length || 1)
         .get()
         .catch(() => ({ data: [] }))
@@ -73,8 +74,9 @@ function buildStatsText(topic) {
 
 /** GET /topics/{id} —— 详情 + 参与内容 */
 async function detail(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   const id = validators.requireId(payload.id, 'id');
-  const topic = await db.findOneById(COLLECTIONS.topics, id);
+  const topic = await db.findOneById(COLLECTIONS.topics, id, clubId);
   if (!policies.canReadTopic(ctx.viewer, topic)) throw errors.notAccessible({ topicId: id });
 
   const posts = require('./posts');
@@ -82,10 +84,11 @@ async function detail(payload, ctx) {
   const { items, hasMore } = await db.paginate(COLLECTIONS.posts, where, {
     cursor: validators.parseCursor(payload.cursor),
     pageSize: validators.clampPageSize(payload.pageSize),
+    clubId,
   });
 
   const follow = ctx.viewer.userId
-    ? await db.findOneById(COLLECTIONS.topicFollows, `${ctx.viewer.userId}:${id}`)
+    ? await db.findOneById(COLLECTIONS.topicFollows, `${ctx.viewer.userId}:${id}`, clubId)
     : null;
 
   return {
@@ -102,12 +105,13 @@ async function detail(payload, ctx) {
 
 /** POST /topics —— 社员提交话题，进入待审；同名引导参与 */
 async function create(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
   const input = validators.validateTopicInput(payload);
 
   const existing = await db
-    .coll(COLLECTIONS.topics)
-    .where({ clubId: DEFAULT_CLUB_ID, title: input.title })
+    .coll(COLLECTIONS.topics, clubId)
+    .where({ clubId, title: input.title })
     .limit(1)
     .get()
     .catch(() => ({ data: [] }));
@@ -117,9 +121,9 @@ async function create(payload, ctx) {
     return { duplicated: true, id: existing.data[0]._id, status: existing.data[0].status };
   }
 
-  const added = await db.coll(COLLECTIONS.topics).add({
+  const added = await db.coll(COLLECTIONS.topics, clubId).add({
     data: {
-      clubId: DEFAULT_CLUB_ID,
+      clubId,
       ownerId: ctx.viewer.userId,
       title: input.title,
       description: input.description,
@@ -140,22 +144,23 @@ async function create(payload, ctx) {
 
 /** PUT/DELETE /topics/{id}/follow —— 关注只是把话题存到「我的话题」 */
 async function toggleFollow(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
   const id = validators.requireId(payload.id, 'id');
   const next = payload.next === true;
 
-  const topic = await db.findOneById(COLLECTIONS.topics, id);
+  const topic = await db.findOneById(COLLECTIONS.topics, id, clubId);
   if (!policies.canReadTopic(ctx.viewer, topic)) throw errors.notAccessible({ topicId: id });
 
   const docId = `${ctx.viewer.userId}:${id}`;
-  const existing = await db.findOneById(COLLECTIONS.topicFollows, docId);
+  const existing = await db.findOneById(COLLECTIONS.topicFollows, docId, clubId);
 
   if (next && !existing) {
-    await db.coll(COLLECTIONS.topicFollows).add({
-      data: { _id: docId, userId: ctx.viewer.userId, topicId: id, createdAt: db.serverDate() },
+    await db.coll(COLLECTIONS.topicFollows, clubId).add({
+      data: { _id: docId, userId: ctx.viewer.userId, clubId, topicId: id, createdAt: db.serverDate() },
     });
   } else if (!next && existing) {
-    await db.coll(COLLECTIONS.topicFollows).doc(docId).remove();
+    await db.coll(COLLECTIONS.topicFollows, clubId).doc(docId).remove();
   }
 
   return { ok: true };
@@ -163,17 +168,19 @@ async function toggleFollow(payload, ctx) {
 
 /** GET /me/topics —— 我关注的话题 */
 async function myFollows(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
 
   const follows = await db.paginate(
     COLLECTIONS.topicFollows,
-    { userId: ctx.viewer.userId },
-    { cursor: validators.parseCursor(payload.cursor), pageSize: validators.clampPageSize(payload.pageSize) },
+    { userId: ctx.viewer.userId, clubId },
+    { cursor: validators.parseCursor(payload.cursor), pageSize: validators.clampPageSize(payload.pageSize), clubId },
   );
 
   const topics = await db.findByIds(
     COLLECTIONS.topics,
     follows.items.map((f) => f.topicId),
+    clubId,
   );
   // 关注列表是本人数据，无计数泄露面；话题可读性在这里复核即可
   const readable = topics.filter((t) => policies.canReadTopic(ctx.viewer, t));

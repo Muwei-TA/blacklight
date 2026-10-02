@@ -38,7 +38,7 @@ test('admin target mapping uses the queue for both moderation and appeals', () =
 
 test('revoked admin sees neither old admin messages nor their unread count', async () => {
   for (const [role, memberStatus] of [[constants.ROLE.MEMBER, 'active'], [constants.ROLE.ADMIN, 'removed']]) {
-    const viewer = policies.buildViewer({ userId: 'user-1', role, memberStatus });
+    const viewer = policies.buildViewer({ userId: 'user-1', clubId: constants.DEFAULT_CLUB_ID, role, memberStatus });
     const list = await notifications.list({ tab: 'system' }, { viewer });
     assert.deepEqual(list.items.map((n) => n.id), ['post']);
     assert.equal((await notifications.unreadCount({}, { viewer })).count, 1);
@@ -48,7 +48,7 @@ test('revoked admin sees neither old admin messages nor their unread count', asy
 
 test('both currently active administrator roles retain all system messages and count', async () => {
   for (const role of [constants.ROLE.ADMIN, constants.ROLE.MODERATOR]) {
-    const viewer = policies.buildViewer({ userId: 'user-1', role, memberStatus: 'active' });
+    const viewer = policies.buildViewer({ userId: 'user-1', clubId: constants.DEFAULT_CLUB_ID, role, memberStatus: 'active' });
     assert.equal((await notifications.list({ tab: 'system' }, { viewer })).items.length, 3);
     assert.equal((await notifications.unreadCount({}, { viewer })).count, 3);
   }

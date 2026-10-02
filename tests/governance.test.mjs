@@ -14,7 +14,7 @@ const rootErrors = require('../shared/errors.js');
 const calls = [];
 const fakeDb = {
   async findOneById(_name, id) {
-    if (id === 'post-hidden') return { _id: id, ownerId: 'u_author', status: POST_STATUS.HIDDEN, version: 4 };
+    if (id === 'post-hidden') return { _id: id, clubId: rootConstants.DEFAULT_CLUB_ID, ownerId: 'u_author', status: POST_STATUS.HIDDEN, version: 4 };
     return null;
   },
   getDb() {
@@ -83,11 +83,13 @@ Module._load = originalLoad;
 
 const moderator = policies.buildViewer({
   userId: 'u_mod',
+  clubId: rootConstants.DEFAULT_CLUB_ID,
   role: ROLE.MODERATOR,
   memberStatus: MEMBER_STATUS.ACTIVE,
 });
 const admin = policies.buildViewer({
   userId: 'u_admin',
+  clubId: rootConstants.DEFAULT_CLUB_ID,
   role: ROLE.ADMIN,
   memberStatus: MEMBER_STATUS.ACTIVE,
 });
@@ -131,6 +133,7 @@ test('申诉读取帖子后只允许作者对 hidden 内容发起，并绑定版
   calls.length = 0;
   await governance.createAppeal({ postId: 'post-hidden', reason: '补充证据', contentVersion: 4 }, ctx(policies.buildViewer({
     userId: 'u_author',
+    clubId: rootConstants.DEFAULT_CLUB_ID,
     role: ROLE.MEMBER,
     memberStatus: MEMBER_STATUS.ACTIVE,
   })));
@@ -153,7 +156,7 @@ test('申诉决定必须是 moderator/admin 且必须有理由', async () => {
 test('申诉列表只返回授权 DTO，不携带私密正文或 owner 身份', async () => {
   calls.length = 0;
   const mine = await governance.listMyAppeals({ limit: 10 }, ctx(policies.buildViewer({
-    userId: 'u_author', role: ROLE.MEMBER, memberStatus: MEMBER_STATUS.ACTIVE,
+    userId: 'u_author', clubId: rootConstants.DEFAULT_CLUB_ID, role: ROLE.MEMBER, memberStatus: MEMBER_STATUS.ACTIVE,
   })));
   assert.equal(calls[0].args.p_action, 'appeals.mine');
   assert.deepEqual(mine.items[0], {
@@ -185,7 +188,7 @@ test('申诉列表拒绝未授权的访客和普通成员', async () => {
   );
   await assert.rejects(
     governance.listAppeals({}, ctx(policies.buildViewer({
-      userId: 'u_member', role: ROLE.MEMBER, memberStatus: MEMBER_STATUS.ACTIVE,
+      userId: 'u_member', clubId: rootConstants.DEFAULT_CLUB_ID, role: ROLE.MEMBER, memberStatus: MEMBER_STATUS.ACTIVE,
     }))),
     (error) => error.kind === 'forbidden',
   );

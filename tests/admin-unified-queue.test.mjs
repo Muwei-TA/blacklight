@@ -59,6 +59,7 @@ Module._load = originalLoad;
 
 const admin = policies.buildViewer({
   userId: 'admin-1',
+  clubId: constants.DEFAULT_CLUB_ID,
   role: constants.ROLE.ADMIN,
   memberStatus: constants.MEMBER_STATUS.ACTIVE,
 });
@@ -79,7 +80,7 @@ test('统一审核游标保留跨队列同时间同 ID 的后一项', async () =
     title: '新板块', description: '', version: 1, createdAt,
   }]);
   fixtures.set(constants.COLLECTIONS.reports, [{
-    _id: 'same-id', status: 'received', targetType: 'post', targetId: 'post-1',
+    _id: 'same-id', clubId: constants.DEFAULT_CLUB_ID, status: 'received', targetType: 'post', targetId: 'post-1',
     reason: '请核查', reporterId: 'must-not-cross-dto', version: 2, createdAt,
   }]);
 
@@ -102,9 +103,9 @@ test('内容队列跳过排队中和过期版本，只呈现人工任务的当�
   const staleAt = '2026-09-27T08:00:00.000Z';
   const currentAt = '2026-09-27T08:01:00.000Z';
   fixtures.set(constants.COLLECTIONS.reviewTasks, [
-    { _id: 'review:stale', targetType: 'post', targetId: 'stale', postVersion: 1, status: 'manual', createdAt: staleAt },
-    { _id: 'review:queued', targetType: 'post', targetId: 'queued', postVersion: 1, status: 'queued', createdAt: '2026-09-27T08:00:30.000Z' },
-    { _id: 'review:article', targetType: 'post', targetId: 'article', postVersion: 2, status: 'manual', createdAt: currentAt },
+    { _id: 'review:stale', clubId: constants.DEFAULT_CLUB_ID, targetType: 'post', targetId: 'stale', postVersion: 1, status: 'manual', createdAt: staleAt },
+    { _id: 'review:queued', clubId: constants.DEFAULT_CLUB_ID, targetType: 'post', targetId: 'queued', postVersion: 1, status: 'queued', createdAt: '2026-09-27T08:00:30.000Z' },
+    { _id: 'review:article', clubId: constants.DEFAULT_CLUB_ID, targetType: 'post', targetId: 'article', postVersion: 2, status: 'manual', createdAt: currentAt },
   ]);
   posts = [
     { _id: 'stale', clubId: constants.DEFAULT_CLUB_ID, status: 'pending', visibility: 'public', version: 2, title: '旧版本' },
@@ -124,11 +125,11 @@ test('统一队列越过不可见文集任务继续填充后续可见待办', as
   reset();
   fixtures.set(constants.COLLECTIONS.reviewTasks, [
     {
-      _id: 'collection:private', targetType: 'collection_submission', targetId: 'private-post',
+      _id: 'collection:private', clubId: constants.DEFAULT_CLUB_ID, targetType: 'collection_submission', targetId: 'private-post',
       collectionId: 'collection-1', status: 'queued', version: 1, createdAt: '2026-09-27T08:00:00.000Z',
     },
     {
-      _id: 'collection:visible', targetType: 'collection_submission', targetId: 'visible-post',
+      _id: 'collection:visible', clubId: constants.DEFAULT_CLUB_ID, targetType: 'collection_submission', targetId: 'visible-post',
       collectionId: 'collection-1', status: 'queued', version: 2, createdAt: '2026-09-27T08:01:00.000Z',
     },
   ]);

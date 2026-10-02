@@ -75,6 +75,7 @@ async function callGovernance(action, input, ctx) {
       p_action: action,
       p_actor_id: ctx.viewer.userId,
       p_input: input,
+      p_club_id: ctx.viewer.clubId,
     });
   } catch (error) {
     const mapped = mapGovernanceError(error);
@@ -93,6 +94,7 @@ async function callAdminGovernance(action, input, ctx) {
       p_action: action,
       p_actor_id: ctx.viewer.userId,
       p_input: input,
+      p_club_id: ctx.viewer.clubId,
     });
   } catch (error) {
     const mapped = mapGovernanceError(error);
@@ -110,6 +112,7 @@ async function callInviteCreate(input, ctx) {
     return await store.rpc('hg_create_invite', {
       p_actor_id: ctx.viewer.userId,
       p_input: input,
+      p_club_id: ctx.viewer.clubId,
     });
   } catch (error) {
     const mapped = mapGovernanceError(error);
@@ -161,9 +164,10 @@ async function changeMemberRole(payload, ctx) {
 /** `appeals/create`: the read is only to apply the shared author/status policy. */
 async function createAppeal(payload, ctx) {
   if (!ctx.viewer.isAuthenticated) throw errors.unauthenticated();
+  const clubId = ctx.viewer.clubId;
   const postId = validators.requireId(payload.postId, 'postId');
   const reason = validators.requireString(payload.reason, '申诉理由', { max: 1000 });
-  const post = await db.findOneById(COLLECTIONS.posts, postId);
+  const post = await db.findOneById(COLLECTIONS.posts, postId, clubId);
   if (!policies.canSubmitAppeal(ctx.viewer, post)) throw errors.notAccessible({ postId });
 
   const contentVersion = post.version || 1;
