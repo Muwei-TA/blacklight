@@ -38,6 +38,29 @@ jobs:
         run: npm run lint
       - name: Unit tests
         run: npm test
+      - name: Install PostgreSQL client
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends postgresql-client
+          psql --version
+      - name: Initialize isolated PostgreSQL schema
+        shell: bash
+        env:
+          PGHOST: postgres
+          PGPORT: '5432'
+          PGPASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: blacklight_test
+        run: |
+          set -euo pipefail
+          password_file=$(mktemp)
+          trap 'rm -f "$password_file"' EXIT
+          printf '%s' 'ci-only-app-password' > "$password_file"
+          chmod 600 "$password_file"
+          LOCAL_MIGRATIONS_DIR="$GITHUB_WORKSPACE/cloudbase/migrations" \
+          LOCAL_COMPAT_DIR="$GITHUB_WORKSPACE/deploy/nas/compat" \
+          NAS_APP_DATABASE_PASSWORD_FILE="$password_file" \
+          bash scripts/local-apply-migrations.sh
       - name: PostgreSQL integration tests
         run: node --test --test-concurrency=1 tests/integration/comment-reaction-pg.test.mjs tests/integration/user-levels-pg.test.mjs
         env:
