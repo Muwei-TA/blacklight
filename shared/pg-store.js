@@ -24,6 +24,11 @@ const RPC_NAMES = new Set([
   'hg_governance',
   'hg_governance_admin',
   'hg_create_invite',
+  'hg_admin_appeals_queue',
+  'hg_create_board',
+  'hg_decide_board',
+  'hg_user_levels_check_in',
+  'hg_user_levels_snapshot',
   'hg_usage_reserve_review_call',
   'hg_finish_review',
 ]);
