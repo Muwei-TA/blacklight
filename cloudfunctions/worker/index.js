@@ -13,6 +13,7 @@
 const { COLLECTIONS, REVIEW_TASK_STATUS, DEFAULT_CLUB_ID } = require('./shared/constants');
 const db = require('./shared/db');
 const { scrubForLog } = require('./shared/anonymity');
+const { withCloudbaseWriteGate } = require('./shared/write-gate');
 
 const reviewTasks = require('./tasks/review');
 const mediaTasks = require('./tasks/media');
@@ -218,7 +219,7 @@ async function runTask(task) {
   }
 }
 
-exports.main = async (event = {}, context = {}) => {
+const main = async (event = {}, context = {}) => {
   let cloud;
   try {
     cloud = db.getCloud();
@@ -355,6 +356,8 @@ exports.main = async (event = {}, context = {}) => {
   console.log('[worker] summary', summary);
   return { code: 0, data: summary };
 };
+
+exports.main = withCloudbaseWriteGate(main);
 
 module.exports._internals = {
   MAX_ATTEMPTS,

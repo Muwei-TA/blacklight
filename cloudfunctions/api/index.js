@@ -9,6 +9,7 @@
  */
 
 const { createRouter } = require('./shared/router');
+const { withCloudbaseWriteGate } = require('./shared/write-gate');
 
 const session = require('./domain/session');
 const levels = require('./domain/levels');
@@ -110,5 +111,5 @@ const handlers = {
   'admin/appeal/decide': governance.decideAppeal,
 };
 
-exports.main = createRouter(handlers, { name: 'api' });
+exports.main = withCloudbaseWriteGate(createRouter(handlers, { name: 'api' }));
 exports.handlers = handlers;

@@ -12,6 +12,7 @@ const crypto = require('node:crypto');
 const cloud = require('wx-server-sdk');
 const { COLLECTIONS, ASSET_STATUS, REVIEW_TASK_STATUS } = require('./shared/constants');
 const db = require('./shared/db');
+const { withCloudbaseWriteGate } = require('./shared/write-gate');
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
@@ -218,7 +219,7 @@ async function wakePostReview(asset) {
     .update({ data: { nextAttemptAt: new Date(), waitingReason: '' } });
 }
 
-exports.main = async (event = {}) => {
+const main = async (event = {}) => {
   const source = verifySource(event);
   if (!source.ok) {
     console.warn('[review-callback] rejected invocation source', {
@@ -342,6 +343,8 @@ exports.main = async (event = {}) => {
   await wakePostReview(asset);
   return { code: 0, note: 'rejected' };
 };
+
+exports.main = withCloudbaseWriteGate(main);
 
 exports._internals = {
   constantTimeEqual,
