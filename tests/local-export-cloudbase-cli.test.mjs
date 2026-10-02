@@ -52,15 +52,17 @@ if (args[0] === 'db' && args[1] === 'execute') {
   if (!table) process.exit(8);
   if (/^SELECT count\(\*\)/i.test(sql)) {
     const count = rowCount(table);
-    return json({ data: { Columns: '["count"]', Rows: JSON.stringify([String(count)]) } });
+    return json({ data: { Columns: ['count'], Rows: [JSON.stringify([String(count)])] } });
   }
   if (mode === 'page-mismatch') {
-    return json({ data: { Columns: '["row"]', Rows: '[]' } });
+    return json({ data: { Columns: ['row'], Rows: [] } });
   }
   const match = sql.match(/OFFSET (\d+)$/);
   const offset = Number(match?.[1] || 0);
-  const rows = offset === 0 && rowCount(table) > 0 ? [JSON.stringify(rowFor(table))] : [];
-  return json({ data: { Columns: '["row"]', Rows: JSON.stringify(rows) } });
+  const rows = offset === 0 && rowCount(table) > 0
+    ? [JSON.stringify([JSON.stringify(rowFor(table))])]
+    : [];
+  return json({ data: { Columns: ['row'], Rows: rows } });
 }
 
 if (args[0] === 'storage' && args[1] === 'objects' && args[2] === 'list') {

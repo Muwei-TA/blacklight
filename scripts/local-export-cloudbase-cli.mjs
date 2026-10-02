@@ -93,11 +93,19 @@ function parseJsonArray(value, label) {
 
 function parseQueryRows(data) {
   const columns = parseJsonArray(data.Columns, 'query columns');
-  const rows = parseJsonArray(data.Rows, 'query rows');
+  const encodedRows = parseJsonArray(data.Rows, 'query rows');
   if (columns.length !== 1 || typeof columns[0] !== 'string' || !columns[0]
-    || rows.some((row) => typeof row !== 'string')) {
+    || encodedRows.some((row) => typeof row !== 'string')) {
     throw fail('DB_RESPONSE_INVALID', 'query result did not match the expected one-column row format');
   }
+  const rows = encodedRows.map((encodedRow) => {
+    let cells;
+    try { cells = JSON.parse(encodedRow); } catch { throw fail('DB_RESPONSE_INVALID', 'query row was not a JSON array'); }
+    if (!Array.isArray(cells) || cells.length !== 1 || typeof cells[0] !== 'string') {
+      throw fail('DB_RESPONSE_INVALID', 'query row did not contain one string cell');
+    }
+    return cells[0];
+  });
   return { column: columns[0], rows };
 }
 
