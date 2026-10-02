@@ -269,6 +269,7 @@ function presentUser(user) {
 function presentSession({ viewer, user, capabilities, club }) {
   return {
     role: viewer.role,
+    platformRole: viewer.platformRole || 'none',
     memberStatus: viewer.memberStatus,
     user: presentUser(user),
     capabilities: {
@@ -281,6 +282,7 @@ function presentSession({ viewer, user, capabilities, club }) {
     },
     club: club
       ? {
+          id: club.clubId || club._id,
           name: club.name,
           slogan: club.slogan || '',
           intro: club.intro || '',

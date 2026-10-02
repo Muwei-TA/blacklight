@@ -9,8 +9,8 @@ const SECRET_NAMES = [
   'ANON_ALIAS_SECRET',
 ];
 
-function loadSecretFiles() {
-  for (const name of SECRET_NAMES) {
+function loadSecretFiles(names = SECRET_NAMES) {
+  for (const name of names) {
     const filePath = process.env[`${name}_FILE`];
     if (!filePath) continue;
     if (process.env[name]) throw new Error(`${name} and ${name}_FILE cannot both be set`);

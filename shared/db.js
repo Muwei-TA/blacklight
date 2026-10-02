@@ -36,8 +36,8 @@ function command() {
   return getDb().command;
 }
 
-function coll(name) {
-  return getDb().collection(name);
+function coll(name, clubId) {
+  return getDb().collection(name, clubId);
 }
 
 function serverDate() {
@@ -57,6 +57,7 @@ async function paginate(name, where = {}, {
   pageSize = 20,
   order = 'desc',
   includeEqualId = false,
+  clubId = undefined,
 } = {}) {
   const _ = command();
   let query = { ...where };
@@ -76,7 +77,9 @@ async function paginate(name, where = {}, {
     query = { $and: [where, afterCursor] };
   }
 
-  const res = await coll(name)
+  if (clubId) query = { $and: [query, { clubId }] };
+
+  const res = await coll(name, clubId)
     .where(query)
     .orderBy('createdAt', order)
     .orderBy('_id', order)
@@ -89,17 +92,17 @@ async function paginate(name, where = {}, {
 }
 
 /** 批量按 _id 取文档，避免 N+1 查询 */
-async function findByIds(name, ids = []) {
+async function findByIds(name, ids = [], clubId = undefined) {
   const unique = [...new Set(ids.filter(Boolean))];
   if (unique.length === 0) return [];
   const _ = command();
-  const res = await coll(name).where({ _id: _.in(unique) }).limit(unique.length).get();
+  const res = await coll(name, clubId).where({ _id: _.in(unique), ...(clubId ? { clubId } : {}) }).limit(unique.length).get();
   return res.data || [];
 }
 
-async function findOneById(name, id) {
+async function findOneById(name, id, clubId = undefined) {
   if (!id) return null;
-  const res = await coll(name).doc(id).get();
+  const res = await coll(name, clubId).doc(id).get();
   return res && res.data ? res.data : null;
 }
 
@@ -107,9 +110,9 @@ async function findOneById(name, id) {
  * 乐观并发更新。expectedVersion 不匹配则抛 conflict。
  * 所有涉及状态流转的写操作都必须走这里。
  */
-async function updateWithVersion(name, id, expectedVersion, data) {
-  const res = await coll(name)
-    .where({ _id: id, version: expectedVersion })
+async function updateWithVersion(name, id, expectedVersion, data, clubId = undefined) {
+  const res = await coll(name, clubId)
+    .where({ _id: id, version: expectedVersion, ...(clubId ? { clubId } : {}) })
     .update({
       data: { ...data, version: expectedVersion + 1, updatedAt: serverDate() },
     });
@@ -157,11 +160,12 @@ async function completeIdempotency(key, userId, action, result) {
  * 审计日志。所有管理操作、匿名映射访问、导出与注销都必须写。
  * 日志不存原始私密正文，只存 ID 与决定。
  */
-async function writeAudit({ actorId, action, targetType, targetId, decision, reason, extra = {} }) {
-  await coll(COLLECTIONS.auditLogs)
+async function writeAudit({ actorId, action, targetType, targetId, decision, reason, extra = {}, clubId = undefined }) {
+  await coll(COLLECTIONS.auditLogs, clubId)
     .add({
       data: {
         actorId,
+        ...(clubId ? { clubId } : {}),
         action,
         targetType,
         targetId,
@@ -178,10 +182,10 @@ async function writeAudit({ actorId, action, targetType, targetId, decision, rea
 }
 
 /** 原子计数器 */
-async function incCounter(name, id, field, delta = 1) {
+async function incCounter(name, id, field, delta = 1, clubId = undefined) {
   const _ = command();
-  await coll(name)
-    .doc(id)
+  await coll(name, clubId)
+    .where({ _id: id, ...(clubId ? { clubId } : {}) })
     .update({ data: { [field]: _.inc(delta) } })
     .catch(() => {});
 }

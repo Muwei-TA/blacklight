@@ -4,9 +4,10 @@
 
 const { randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
-const { COLLECTIONS } = require('./constants');
+const { COLLECTIONS, DEFAULT_CLUB_ID } = require('./constants');
 
 const RPC_NAMES = new Set([
+  'hg_platform_clubs',
   'hg_store',
   'hg_create_post',
   'hg_resubmit_rejected_post',
@@ -29,8 +30,11 @@ const RPC_NAMES = new Set([
   'hg_decide_board',
   'hg_user_levels_check_in',
   'hg_user_levels_snapshot',
+  'hg_user_clubs',
+  'hg_all_club_ids',
   'hg_usage_reserve_review_call',
   'hg_finish_review',
+  'hg_cleanup_asset',
 ]);
 
 const allowed = new Set(Object.values(COLLECTIONS));
@@ -79,15 +83,15 @@ command.or = (value) => ({ $or: value });
 const serverDate = () => new Date().toISOString();
 
 class Query {
-  constructor(name, query = {}, order = [], limit = 100, single = false) {
+  constructor(name, clubId = DEFAULT_CLUB_ID, query = {}, order = [], limit = 100, single = false) {
     if (!allowed.has(name)) throw new Error('Unknown repository');
-    Object.assign(this, { name, query, order, take: limit, single });
+    Object.assign(this, { name, clubId, query, order, take: limit, single });
   }
 
-  where(query) { return new Query(this.name, query, this.order, this.take); }
-  doc(id) { return new Query(this.name, { _id: id }, this.order, 1, true); }
-  orderBy(field, direction) { return new Query(this.name, this.query, [...this.order, [field, direction]], this.take, this.single); }
-  limit(limit) { return new Query(this.name, this.query, this.order, limit, this.single); }
+  where(query) { return new Query(this.name, this.clubId, query, this.order, this.take); }
+  doc(id) { return new Query(this.name, this.clubId, { _id: id }, this.order, 1, true); }
+  orderBy(field, direction) { return new Query(this.name, this.clubId, this.query, [...this.order, [field, direction]], this.take, this.single); }
+  limit(limit) { return new Query(this.name, this.clubId, this.query, this.order, limit, this.single); }
 
   async execute(kind, data = {}) {
     return rpc('hg_store', {
@@ -97,6 +101,7 @@ class Query {
       p_data: data,
       p_order: this.order,
       p_limit: this.take,
+      p_club_id: this.clubId,
     });
   }
 
@@ -111,7 +116,7 @@ class Query {
   remove() { return this.execute('remove'); }
 }
 
-function collection(name) { return new Query(name); }
+function collection(name, clubId = DEFAULT_CLUB_ID) { return new Query(name, clubId); }
 function RegExpFilter({ regexp, options }) { return { $op: 'regex', value: regexp, options }; }
 
 async function query(text, values = []) {

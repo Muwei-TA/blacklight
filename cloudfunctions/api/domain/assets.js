@@ -60,6 +60,7 @@ async function imageRpc(name, args) {
   }
 }
 async function createIntent(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
   if (!policies.canUseUploads(ctx.viewer, ctx.capabilities)) throw errors.forbidden();
   const input = ensureImageIntentPayload(payload);
@@ -67,20 +68,22 @@ async function createIntent(payload, ctx) {
   const assetId = crypto.randomUUID();
   const createdAt = db.serverDate();
   const asset = {
-    _id: assetId, ownerId: ctx.viewer.userId, clubId: ctx.viewer.clubId, mediaType: 'image', declaredSize: input.size,
+    _id: assetId, ownerId: ctx.viewer.userId, clubId, mediaType: 'image', declaredSize: input.size,
     quotaBytes: MAX_DECODED_BYTES, declaredDuration: 0, mimeType: input.mimeType,
     status: ASSET_STATUS.INTENT, postId: '', postVersion: 0, fileId: '', cleanedFileId: '',
     cloudPath: buildStoragePath(), expiresAt: new Date(nowMillis()+INTENT_TTL_MS).toISOString(),
     reviewTaskId: '', tempFileURL: '', coverURL: '', createdAt, updatedAt: createdAt,
   };
   return imageRpc('hg_image_intent', {
-    p_owner: ctx.viewer.userId, p_club_id: ctx.viewer.clubId, p_key: key, p_asset: asset,
+    p_owner: ctx.viewer.userId, p_club_id: clubId, p_key: key, p_asset: asset,
   });
 }
 
 async function findOwnedIntent(assetId, ctx) {
-  const asset = await db.findOneById(COLLECTIONS.assets, assetId);
+  const clubId = ctx.viewer.clubId;
+  const asset = await db.findOneById(COLLECTIONS.assets, assetId, clubId);
   if (!asset) throw errors.notAccessible({ assetId });
+  if (asset.clubId !== clubId) throw errors.notAccessible({ assetId });
   if (asset.ownerId !== ctx.viewer.userId) throw errors.forbidden({ reason: 'asset owner mismatch' });
   if (asset.mediaType !== 'image') throw errors.forbidden({ reason: 'video uploads are disabled' });
   return asset;
@@ -91,6 +94,7 @@ async function findOwnedIntent(assetId, ctx) {
  * after lease expiry must use identical bytes; published objects cannot change.
  */
 async function uploadImage(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   if (!policies.canUseUploads(ctx.viewer, ctx.capabilities)) throw errors.forbidden();
   const assetId = validators.requireId(payload.assetId, 'assetId');
   const key = validators.requireString(payload.idempotencyKey, '请求标识', { min: 8, max: 120 });
@@ -101,7 +105,7 @@ async function uploadImage(payload, ctx) {
   if (cleaned.actualSize !== asset.declaredSize) throw errors.invalidInput('图片大小与上传意图不一致');
   const hash = crypto.createHash('sha256').update(cleaned.buffer).digest('hex');
   const claimId = crypto.randomUUID();
-  const reserved = await imageRpc('hg_claim_image', { p_owner: ctx.viewer.userId, p_asset_id: assetId, p_key: key, p_hash: hash, p_claim: claimId });
+  const reserved = await imageRpc('hg_claim_image', { p_owner: ctx.viewer.userId, p_asset_id: assetId, p_key: key, p_hash: hash, p_claim: claimId, p_club_id: clubId });
   const toResult = (a) => ({ assetId, status: a.status, width: a.width || 0, height: a.height || 0, actualSize: a.actualSize || 0, cleanedSize: a.cleanedSize || 0 });
   if (reserved.fileId && reserved.status !== ASSET_STATUS.INTENT) return toResult(reserved);
   const cloud = db.getStorage();
@@ -111,7 +115,7 @@ async function uploadImage(payload, ctx) {
   const metadata = await storage.getUploadMetadata({ cloudPath: reserved.cloudPath });
   const reservedFileId = metadata && metadata.data && metadata.data.fileId;
   if (!reservedFileId) throw new Error('storage reservation failed');
-  const tracked = await db.coll(COLLECTIONS.assets).where({ _id: assetId, status: ASSET_STATUS.INTENT, uploadClaim: claimId }).update({ data: { reservedFileId } });
+  const tracked = await db.coll(COLLECTIONS.assets, clubId).where({ _id: assetId, clubId, status: ASSET_STATUS.INTENT, uploadClaim: claimId }).update({ data: { reservedFileId } });
   if (!tracked.stats || tracked.stats.updated !== 1) throw errors.conflict('上传租约已更新');
   const uploaded = await cloud.uploadFile({ cloudPath: reserved.cloudPath, fileContent: cleaned.buffer });
   const fileId = uploaded && (uploaded.fileID || uploaded.fileId);
@@ -125,7 +129,7 @@ async function uploadImage(payload, ctx) {
     cleanedMimeType: JPEG_MIME, cleanedAt: db.serverDate(), updatedAt: db.serverDate(),
     uploadLeaseUntil: null,
   };
-  const updated = await db.coll(COLLECTIONS.assets).where({ _id: assetId, ownerId: ctx.viewer.userId, status: ASSET_STATUS.INTENT, uploadClaim: claimId }).update({ data });
+  const updated = await db.coll(COLLECTIONS.assets, clubId).where({ _id: assetId, clubId, ownerId: ctx.viewer.userId, status: ASSET_STATUS.INTENT, uploadClaim: claimId }).update({ data });
   if (!updated.stats || updated.stats.updated !== 1) throw errors.conflict('上传租约已更新，请使用同一图片重试');
   return toResult(data);
 }
@@ -134,16 +138,20 @@ async function confirmUpload(payload, ctx) {
   if (!policies.canUseUploads(ctx.viewer, ctx.capabilities)) throw errors.forbidden();
   if (payload.fileId) throw errors.invalidInput('客户端不能提交 fileId', { field: 'fileId' });
   const assetId = validators.requireId(payload.assetId, 'assetId');
-  await imageRpc('hg_confirm_image', { p_owner: ctx.viewer.userId, p_asset_id: assetId });
+  const clubId = ctx.viewer.clubId;
+  await imageRpc('hg_confirm_image', { p_owner: ctx.viewer.userId, p_asset_id: assetId, p_club_id: clubId });
   await require('./foreground-review').runOwnedReview('asset', assetId, ctx).catch(() => null);
   const current = await findOwnedIntent(assetId, ctx);
   return { assetId, status: current.status };
 }
 
 async function canReadAsset(asset, ctx) {
-  if (asset.ownerId === ctx.viewer.userId && !asset.postId) return true;
+  const clubId = ctx.viewer.clubId;
+  if (asset.clubId !== clubId) return false;
+  if (asset.ownerId === ctx.viewer.userId && ctx.viewer.isMember && !asset.postId) return true;
   if (!asset.postId) return false;
-  const post = await db.findOneById(COLLECTIONS.posts, asset.postId);
+  const post = await db.findOneById(COLLECTIONS.posts, asset.postId, clubId);
+  if (!post || post.clubId !== asset.clubId) return false;
   return policies.canReadPost(ctx.viewer, post);
 }
 
@@ -158,6 +166,7 @@ async function authorizedUrl(asset, ctx = null, post = null) {
     try {
       return cloud.createAssetUrl({
         assetId: asset._id,
+        clubId: asset.clubId,
         fileId: asset.fileId,
         userId: ctx.viewer.userId || null,
         permissionVersion,
@@ -173,10 +182,11 @@ async function authorizedUrl(asset, ctx = null, post = null) {
 
 /** GET /assets/{id} —— 每次按内容权限重新签发 URL；管理员不能绕过私密内容。 */
 async function getStatus(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   const assetId = validators.requireId(payload.assetId, 'assetId');
-  const asset = await db.findOneById(COLLECTIONS.assets, assetId);
+  const asset = await db.findOneById(COLLECTIONS.assets, assetId, clubId);
   if (!asset || !(await canReadAsset(asset, ctx))) throw errors.notAccessible({ assetId });
-  const post = asset.postId ? await db.findOneById(COLLECTIONS.posts, asset.postId) : null;
+  const post = asset.postId ? await db.findOneById(COLLECTIONS.posts, asset.postId, clubId) : null;
 
   return {
     assetId,
@@ -191,9 +201,11 @@ async function getStatus(payload, ctx) {
 }
 
 async function signReadableAssets(assets, posts, ctx) {
+  const clubId = ctx.viewer.clubId;
   const allowed = new Map(posts.filter((p) => policies.canReadPost(ctx.viewer, p)).map((p) => [p._id, p]));
   return Promise.all(assets.map(async (asset) => ({
     ...asset, tempFileURL: allowed.has(asset.postId) && (allowed.get(asset.postId).assetIds || []).includes(asset._id)
+      && asset.clubId === clubId && allowed.get(asset.postId).clubId === asset.clubId
       ? await authorizedUrl(asset, ctx, allowed.get(asset.postId)) : '', coverURL: '',
   })));
 }

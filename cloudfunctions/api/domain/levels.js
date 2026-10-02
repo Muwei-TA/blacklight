@@ -17,10 +17,11 @@ function mapMembershipError(error) {
 
 async function getMyLevels(_payload, ctx) {
   const actorId = requireMember(ctx);
+  const clubId = ctx.viewer.clubId;
   const store = db.getDb();
   if (!store || typeof store.rpc !== 'function') throw new Error('user levels RPC is not configured');
   try {
-    return await store.rpc('hg_user_levels_snapshot', { p_actor_id: actorId });
+    return await store.rpc('hg_user_levels_snapshot', { p_actor_id: actorId, p_club_id: clubId });
   } catch (error) {
     mapMembershipError(error);
   }
@@ -28,10 +29,11 @@ async function getMyLevels(_payload, ctx) {
 
 async function checkIn(_payload, ctx) {
   const actorId = requireMember(ctx);
+  const clubId = ctx.viewer.clubId;
   const store = db.getDb();
   if (!store || typeof store.rpc !== 'function') throw new Error('user levels RPC is not configured');
   try {
-    return await store.rpc('hg_user_levels_check_in', { p_actor_id: actorId });
+    return await store.rpc('hg_user_levels_check_in', { p_actor_id: actorId, p_club_id: clubId });
   } catch (error) {
     mapMembershipError(error);
   }

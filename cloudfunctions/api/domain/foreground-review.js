@@ -5,7 +5,7 @@
  * worker tasks into api/tasks and api/recovery. It is deliberately not an
  * action handler: callers must pass the server-created context object.
  */
-const { COLLECTIONS, POST_STATUS, ASSET_STATUS, REVIEW_TASK_STATUS } = require('../shared/constants');
+const { COLLECTIONS, POST_STATUS, ASSET_STATUS, REVIEW_TASK_STATUS, DEFAULT_CLUB_ID } = require('../shared/constants');
 const errors = require('../shared/errors');
 const db = require('../shared/db');
 const review = require('../tasks/review');
@@ -62,29 +62,32 @@ function versionClause(targetType, target) {
   return { postVersion };
 }
 
-async function readTarget(targetType, targetId, spec, viewer) {
-  const target = await db.findOneById(spec.collection, targetId);
+async function readTarget(targetType, targetId, spec, viewer, clubId) {
+  const target = await db.findOneById(spec.collection, targetId, clubId);
   if (!target) throw errors.notAccessible();
+  if ((target.clubId || (clubId === DEFAULT_CLUB_ID ? DEFAULT_CLUB_ID : null)) !== clubId) throw errors.notAccessible();
   if (target.ownerId !== viewer.userId) throw errors.forbidden({ reason: 'review target owner mismatch' });
   return target;
 }
 
-async function findQueuedTask(targetType, targetId, target, now, _) {
+async function findQueuedTask(targetType, targetId, target, now, _, clubId) {
   const query = {
+    clubId,
     targetType,
     targetId,
     status: REVIEW_TASK_STATUS.QUEUED,
     ...versionClause(targetType, target),
     $and: [dueClause(now, _), attemptClause(_)],
   };
-  const result = await db.coll(COLLECTIONS.reviewTasks).where(query).orderBy('createdAt', 'asc').limit(1).get();
+  const result = await db.coll(COLLECTIONS.reviewTasks, clubId).where(query).orderBy('createdAt', 'asc').limit(1).get();
   return result.data && result.data[0] ? result.data[0] : null;
 }
 
-async function claimTask(task, targetType, target, now, _) {
+async function claimTask(task, targetType, target, now, _, clubId) {
   const leaseId = recovery.createLeaseId(`foreground-${targetType}`);
-  const claimed = await db.coll(COLLECTIONS.reviewTasks).where({
+  const claimed = await db.coll(COLLECTIONS.reviewTasks, clubId).where({
     _id: task._id,
+    clubId,
     status: REVIEW_TASK_STATUS.QUEUED,
     ...versionClause(targetType, target),
     $and: [dueClause(now, _), attemptClause(_)],
@@ -95,12 +98,13 @@ async function claimTask(task, targetType, target, now, _) {
     },
   });
   if (!claimed.stats || claimed.stats.updated !== 1) return null;
-  return { ...task, status: REVIEW_TASK_STATUS.RUNNING, leaseId };
+  return { ...task, clubId, status: REVIEW_TASK_STATUS.RUNNING, leaseId };
 }
 
 async function updateClaimedTask(task, data) {
-  const result = await db.coll(COLLECTIONS.reviewTasks).where({
+  const result = await db.coll(COLLECTIONS.reviewTasks, task.clubId).where({
     _id: task._id,
+    clubId: task.clubId,
     status: REVIEW_TASK_STATUS.RUNNING,
     leaseId: task.leaseId,
   }).update({ data });
@@ -134,16 +138,17 @@ function resultPayload(targetType, targetId, target, task, result, reviewState) 
 /** Run one review task on behalf of the owner who just created the target. */
 async function runOwnedReview(targetType, targetId, ctx) {
   const viewer = requireViewer(ctx);
+  const clubId = ctx.viewer.clubId;
   const spec = getTargetSpec(targetType);
-  const target = await readTarget(targetType, targetId, spec, viewer);
+  const target = await readTarget(targetType, targetId, spec, viewer, clubId);
   if (target.status !== spec.status) return resultPayload(targetType, targetId, target, null, null, 'not_applicable');
 
   const now = Date.now();
   const _ = db.command();
-  const queued = await findQueuedTask(targetType, targetId, target, now, _);
+  const queued = await findQueuedTask(targetType, targetId, target, now, _, clubId);
   if (!queued) return resultPayload(targetType, targetId, target, null, null, REVIEW_TASK_STATUS.QUEUED);
 
-  const task = await claimTask(queued, targetType, target, now, _);
+  const task = await claimTask(queued, targetType, target, now, _, clubId);
   if (!task) return resultPayload(targetType, targetId, target, queued, null, 'claim_lost');
 
   try {

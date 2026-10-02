@@ -216,10 +216,12 @@ function createLocalStorageAdapter({ root = mediaRoot(), bucketId = DEFAULT_BUCK
     return { fileList: results };
   }
 
-  function createAssetUrl({ assetId, fileId, userId = null, permissionVersion = null, ttlSeconds = DEFAULT_MEDIA_TTL_SECONDS }) {
+  function createAssetUrl({ assetId, clubId, fileId, userId = null, permissionVersion = null, ttlSeconds = DEFAULT_MEDIA_TTL_SECONDS }) {
+    if (typeof clubId !== 'string' || !clubId) throw new LocalStorageError('asset club is required', 'INVALID_ASSET_CLAIM');
     const payload = {
       v: 1,
       assetId: String(assetId),
+      clubId,
       fileId: String(fileId),
       userId: userId || null,
       permissionVersion: permissionVersion === undefined ? null : permissionVersion,
@@ -238,7 +240,8 @@ function createLocalStorageAdapter({ root = mediaRoot(), bucketId = DEFAULT_BUCK
     if (typeof token !== 'string' || token.length > 2048 || typeof signature !== 'string' || signature.length > 128) return null;
     if (!safeEqual(mac(token), signature)) return null;
     const payload = decryptPayload(token);
-    if (!payload || payload.v !== 1 || typeof payload.assetId !== 'string' || typeof payload.fileId !== 'string') return null;
+    if (!payload || payload.v !== 1 || typeof payload.assetId !== 'string'
+      || typeof payload.clubId !== 'string' || !payload.clubId || typeof payload.fileId !== 'string') return null;
     if (!Number.isInteger(payload.exp) || payload.exp <= Math.floor(now / 1000)) return null;
     try { parseFileId(payload.fileId); } catch (_) { return null; }
     return payload;

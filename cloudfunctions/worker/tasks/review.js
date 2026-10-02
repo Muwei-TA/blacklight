@@ -13,7 +13,6 @@ const {
   POST_STATUS,
   REVIEW_TASK_STATUS,
   ASSET_STATUS,
-  DEFAULT_CLUB_ID,
 } = require('../shared/constants');
 const db = require('../shared/db');
 const usage = require('../shared/usage');
@@ -23,7 +22,8 @@ const wechat = require('../shared/wechat-api');
  * 文本安全检查。
  * @returns {{ pass: boolean, suspect: boolean, label?: string }}
  */
-async function checkText(content, openid, clubId = DEFAULT_CLUB_ID) {
+async function checkText(content, openid, clubId) {
+  if (!clubId) throw new Error('review task club is required');
   if (!content || !content.trim()) return { pass: true, suspect: false };
   // Every character must be reviewed. Long articles cannot silently bypass
   // review after the first 2500 characters. Overlap preserves boundary context.
@@ -54,6 +54,7 @@ async function finishReview(task, expectedVersion, decision, reason = '') {
     p_expected_version: expectedVersion,
     p_decision: decision,
     p_reason: reason,
+    p_club_id: task.clubId,
   });
 
   // hg_finish_review owns the terminal task state.  Keep the local lease
@@ -70,8 +71,9 @@ async function finishReview(task, expectedVersion, decision, reason = '') {
 
 /** 审核一条内容 */
 async function reviewPost(task) {
-  const post = await db.findOneById(COLLECTIONS.posts, task.targetId);
+  const post = await db.findOneById(COLLECTIONS.posts, task.targetId, task.clubId);
   if (!post) return { status: REVIEW_TASK_STATUS.PASSED, note: 'post gone' };
+  if (post.clubId !== task.clubId) return { status: REVIEW_TASK_STATUS.MANUAL, note: 'post club mismatch' };
 
   // 版本已变（作者重新提交）：旧任务作废，不覆盖新版本结果
   if (task.postVersion && post.version !== task.postVersion) {
@@ -87,14 +89,16 @@ async function reviewPost(task) {
   const assetIds = post.assetIds || [];
   let assetRejected = false;
   if (assetIds.length > 0) {
-    const assets = await db.findByIds(COLLECTIONS.assets, assetIds);
+    const assets = await db.findByIds(COLLECTIONS.assets, assetIds, task.clubId);
     const allVerified = assets.length === assetIds.length && assets.every((a) => (
       a.status === ASSET_STATUS.VERIFIED
+      && a.clubId === task.clubId
       && a.postId === post._id
       && a.ownerId === post.ownerId
     ));
     const anyRejected = assets.some((a) => (
       a.status === ASSET_STATUS.REJECTED
+      || a.clubId !== task.clubId
       || a.postId !== post._id
       || a.ownerId !== post.ownerId
     ));
@@ -119,7 +123,7 @@ async function reviewPost(task) {
 
   let result;
   try {
-    result = await checkText(textToCheck, openid, post.clubId || DEFAULT_CLUB_ID);
+    result = await checkText(textToCheck, openid, post.clubId);
   } catch (error) {
     const waiting = usage.waitingForQuota(error);
     if (waiting) return waiting;
@@ -149,8 +153,9 @@ async function reviewPost(task) {
 
 /** 审核评论 */
 async function reviewComment(task) {
-  const comment = await db.findOneById(COLLECTIONS.comments, task.targetId);
+  const comment = await db.findOneById(COLLECTIONS.comments, task.targetId, task.clubId);
   if (!comment) return { status: REVIEW_TASK_STATUS.PASSED, note: 'comment gone' };
+  if (comment.clubId !== task.clubId) return { status: REVIEW_TASK_STATUS.MANUAL, note: 'comment club mismatch' };
   if (comment.status !== POST_STATUS.PENDING) {
     return { status: REVIEW_TASK_STATUS.PASSED, note: `status already ${comment.status}` };
   }
@@ -158,7 +163,7 @@ async function reviewComment(task) {
   const owner = await db.findOneById(COLLECTIONS.users, comment.ownerId);
   let result;
   try {
-    result = await checkText(comment.body, owner && owner.wxOpenIdRef, comment.clubId || DEFAULT_CLUB_ID);
+    result = await checkText(comment.body, owner && owner.wxOpenIdRef, comment.clubId);
   } catch (error) {
     const waiting = usage.waitingForQuota(error);
     if (waiting) return waiting;
@@ -179,11 +184,11 @@ async function reviewComment(task) {
  * 是否收录由人工编辑在管理台决定（安全合格 ≠ 被选中）。
  */
 async function precheckCollectionSubmission(task) {
-  const post = await db.findOneById(COLLECTIONS.posts, task.targetId);
+  const post = await db.findOneById(COLLECTIONS.posts, task.targetId, task.clubId);
   if (!post || post.status !== POST_STATUS.PUBLISHED) {
     return { status: REVIEW_TASK_STATUS.FAILED, note: 'post not published' };
   }
-  const consent = await db.findOneById(COLLECTIONS.consents, `${task.targetId}:collection:${task.collectionId}`);
+  const consent = await db.findOneById(COLLECTIONS.consents, `${task.targetId}:collection:${task.collectionId}`, task.clubId);
   if (!consent || consent.revokedAt) {
     return { status: REVIEW_TASK_STATUS.FAILED, note: 'consent missing or revoked' };
   }

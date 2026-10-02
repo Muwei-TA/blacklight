@@ -68,7 +68,6 @@ function createServer() {
   const auth = require('./auth');
   const pg = require('../shared/pg-store');
   const media = require('./media');
-  const { DEFAULT_CLUB_ID } = require('../shared/constants');
   const { HTTP_BY_KIND } = require('../shared/errors');
   const actionHandler = api.createHandler({ identityResolver: auth.resolveBearerIdentity });
 
@@ -90,12 +89,15 @@ function createServer() {
         await pg.ping();
         let worker = 'starting';
         try {
-          const result = await pg.query(
-            'SELECT doc->>\'workerLastRunAt\' AS last_run_at FROM public.hg_club_config WHERE id = $1 LIMIT 1',
-            [DEFAULT_CLUB_ID],
-          );
-          const lastRun = result.rows[0] && result.rows[0].last_run_at;
-          if (lastRun) worker = Date.now() - new Date(lastRun).getTime() <= 3 * 60 * 1000 ? 'healthy' : 'stale';
+          const result = await pg.query(`
+            SELECT count(*) AS active_count,
+              count(*) FILTER (WHERE NULLIF(doc->>'workerLastRunAt', '')::timestamptz >= now() - interval '3 minutes') AS healthy_count
+            FROM public.hg_club_config
+            WHERE COALESCE(doc->>'status', CASE WHEN id = 'heiguang' THEN 'active' END) = 'active'
+          `);
+          const activeCount = Number(result.rows[0] && result.rows[0].active_count || 0);
+          const healthyCount = Number(result.rows[0] && result.rows[0].healthy_count || 0);
+          if (activeCount > 0) worker = healthyCount === activeCount ? 'healthy' : 'stale';
         } catch (_) {
           worker = 'unknown';
         }
@@ -161,7 +163,7 @@ function createServer() {
           throw new HttpError(400, 'invalid_input', '请求内容不合法');
         }
         const result = await actionHandler(
-          { action: body.action, payload: body.payload || {} },
+          { action: body.action, clubId: body.clubId, payload: body.payload || {} },
           { requestId, request: { headers: req.headers } },
         );
         const status = result.code === 0 ? 200 : (HTTP_BY_KIND[result.code] || 500);

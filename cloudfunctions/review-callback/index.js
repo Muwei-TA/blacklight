@@ -188,6 +188,7 @@ function submittedAtMillis(asset) {
 function assetCondition(asset) {
   const condition = {
     _id: asset._id,
+    clubId: asset.clubId,
     status: ASSET_STATUS.VERIFYING,
     traceId: asset.traceId,
   };
@@ -198,7 +199,7 @@ function assetCondition(asset) {
 
 async function updateAssetConditionally(asset, data) {
   const result = await db
-    .coll(COLLECTIONS.assets)
+    .coll(COLLECTIONS.assets, asset.clubId)
     .where(assetCondition(asset))
     .update({ data });
   return !!(result.stats && result.stats.updated === 1);
@@ -207,13 +208,14 @@ async function updateAssetConditionally(asset, data) {
 async function wakePostReview(asset) {
   if (!asset.postId) return;
   const condition = {
+    clubId: asset.clubId,
     targetType: 'post',
     targetId: asset.postId,
     status: REVIEW_TASK_STATUS.QUEUED,
   };
   if (asset.postVersion !== undefined) condition.postVersion = asset.postVersion;
   await db
-    .coll(COLLECTIONS.reviewTasks)
+    .coll(COLLECTIONS.reviewTasks, asset.clubId)
     .where(condition)
     .update({ data: { nextAttemptAt: new Date(), waitingReason: '' } });
 }
@@ -254,13 +256,16 @@ exports.main = async (event = {}) => {
   const lookup = { traceId };
   const callbackAssetId = readAssetId(payload);
   if (callbackAssetId) lookup._id = callbackAssetId;
-  const res = await db
-    .coll(COLLECTIONS.assets)
-    .where(lookup)
-    .limit(1)
-    .get();
-
-  const asset = res.data && res.data[0];
+  const clubs = await db.getDb().rpc('hg_all_club_ids', {});
+  let asset = null;
+  for (const club of (clubs && clubs.items) || []) {
+    const res = await db.coll(COLLECTIONS.assets, club.clubId)
+      .where({ ...lookup, clubId: club.clubId })
+      .limit(1)
+      .get();
+    asset = res.data && res.data[0];
+    if (asset) break;
+  }
   if (!asset) {
     // 迟到回调且目标已清理：静默确认，不报错
     console.log('[review-callback] asset not found, ignoring', { traceId });

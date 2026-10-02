@@ -41,11 +41,13 @@ Module._load = originalLoad;
 
 const applicant = policies.buildViewer({
   userId: 'u_applicant',
+  clubId: constants.DEFAULT_CLUB_ID,
   role: constants.ROLE.GUEST,
   memberStatus: constants.MEMBER_STATUS.NONE,
 });
 const member = policies.buildViewer({
   userId: 'u_member',
+  clubId: constants.DEFAULT_CLUB_ID,
   role: constants.ROLE.MEMBER,
   memberStatus: constants.MEMBER_STATUS.ACTIVE,
 });

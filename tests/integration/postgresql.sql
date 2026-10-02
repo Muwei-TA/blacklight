@@ -4,6 +4,9 @@ DECLARE result jsonb; second jsonb; post jsonb; n int;
 BEGIN
   IF has_table_privilege('authenticated','public.hg_posts','SELECT') THEN RAISE EXCEPTION 'client read privilege leaked'; END IF;
   IF has_function_privilege('anon','public.hg_store(text,text,jsonb,jsonb,jsonb,integer)','EXECUTE') THEN RAISE EXCEPTION 'client RPC privilege leaked'; END IF;
+  INSERT INTO public.hg_users(id,doc) VALUES ('test-pg-user','{"_id":"test-pg-user","status":"active"}'::jsonb);
+  INSERT INTO public.hg_memberships(id,doc) VALUES ('test-pg-user:heiguang',
+    '{"_id":"test-pg-user:heiguang","userId":"test-pg-user","clubId":"heiguang","status":"active","role":"member"}'::jsonb);
   post := jsonb_build_object('_id','test-pg-atomic-post','ownerId','test-pg-user','clubId','heiguang','body','integration test','visibility','club','status','pending','version',1,'assetIds','[]'::jsonb,'createdAt','2026-09-22T16:00:00.000Z');
   result := public.hg_create_post('test-pg-user:createPost:atomic-key',repeat('a',64),post,NULL);
   second := public.hg_create_post('test-pg-user:createPost:atomic-key',repeat('a',64),post || '{"_id":"test-pg-second-post"}',NULL);

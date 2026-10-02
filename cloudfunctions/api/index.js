@@ -11,6 +11,8 @@
 const { createRouter } = require('./shared/router');
 
 const session = require('./domain/session');
+const platform = require('./domain/platform');
+const clubs = require('./domain/clubs');
 const levels = require('./domain/levels');
 const posts = require('./domain/posts');
 const topics = require('./domain/topics');
@@ -26,7 +28,16 @@ const usage = require('./domain/usage');
 
 const handlers = {
   // ── 会话与成员资格 ──
+  'platform/clubs/list': platform.list,
+  'platform/clubs/create': platform.create,
+  'platform/clubs/update': platform.update,
+  'platform/clubs/set-status': platform.setStatus,
+  'platform/clubs/set-moderator': platform.setModerator,
+  'account/me': session.accountMe,
   'session/me': session.me,
+  'clubs/mine': clubs.mine,
+  'clubs/list': clubs.list,
+  'clubs/detail': clubs.detail,
   'membership/apply': session.apply,
   'membership/mine': session.myApplication,
   'me/profile': session.myProfile,

@@ -14,6 +14,7 @@ COPY cloudfunctions/api/ ./cloudfunctions/api/
 COPY cloudfunctions/worker/ ./cloudfunctions/worker/
 COPY scripts/sync-shared.mjs ./scripts/sync-shared.mjs
 COPY scripts/local-media-manifest.mjs scripts/local-media-receiver.mjs ./scripts/
+COPY scripts/local-platform-role.mjs ./scripts/
 RUN node scripts/sync-shared.mjs \
     && mkdir -p /data/private-media \
     && chown node:node /data/private-media

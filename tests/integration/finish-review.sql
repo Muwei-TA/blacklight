@@ -1,5 +1,4 @@
--- Run after 20260922160000_postgresql_core.sql and
--- 20260922220000_finish_review.sql with the service role.
+-- Run after all migrations with the service role.
 -- Fixtures are unique and the outer transaction is rolled back.
 BEGIN;
 DO $$
@@ -36,23 +35,23 @@ BEGIN
     (bad_asset_post_id, jsonb_build_object('_id', bad_asset_post_id, 'ownerId', author_id, 'clubId', 'heiguang', 'status', 'pending', 'visibility', 'public', 'version', 1, 'assetIds', jsonb_build_array(asset_id), 'body', 'bad asset post'));
   INSERT INTO public.hg_comments (id, doc) VALUES (
     comment_id,
-    jsonb_build_object('_id', comment_id, 'ownerId', commenter_id, 'postId', post_id, 'status', 'pending', 'version', 2, 'body', 'review comment')
+    jsonb_build_object('_id', comment_id, 'clubId', 'heiguang', 'ownerId', commenter_id, 'postId', post_id, 'status', 'pending', 'version', 2, 'body', 'review comment')
   );
   INSERT INTO public.hg_comments (id, doc) VALUES (
     'comment:review-int-pending-parent',
-    jsonb_build_object('_id', 'comment:review-int-pending-parent', 'ownerId', commenter_id, 'postId', pending_parent_id, 'status', 'pending', 'version', 1, 'body', 'pending parent comment')
+    jsonb_build_object('_id', 'comment:review-int-pending-parent', 'clubId', 'heiguang', 'ownerId', commenter_id, 'postId', pending_parent_id, 'status', 'pending', 'version', 1, 'body', 'pending parent comment')
   );
   INSERT INTO public.hg_assets (id, doc) VALUES (
     asset_id,
-    jsonb_build_object('_id', asset_id, 'ownerId', 'wrong-owner', 'postId', bad_asset_post_id, 'status', 'verified')
+    jsonb_build_object('_id', asset_id, 'clubId', 'heiguang', 'ownerId', 'wrong-owner', 'postId', bad_asset_post_id, 'status', 'verified')
   );
   INSERT INTO public.hg_review_tasks (id, doc) VALUES
-    (task_id, jsonb_build_object('_id', task_id, 'targetType', 'post', 'targetId', post_id, 'postVersion', 1, 'status', 'running', 'leaseId', lease_id, 'leaseExpiresAt', '2099-01-01T00:00:00.000Z', 'version', 1)),
-    (stale_task_id, jsonb_build_object('_id', stale_task_id, 'targetType', 'post', 'targetId', reject_post_id, 'postVersion', 1, 'status', 'running', 'leaseId', 'lease:stale', 'leaseExpiresAt', '2020-01-01T00:00:00.000Z', 'version', 1)),
-    (reject_task_id, jsonb_build_object('_id', reject_task_id, 'targetType', 'post', 'targetId', reject_post_id, 'postVersion', 1, 'status', 'running', 'leaseId', 'lease:reject', 'leaseExpiresAt', '2099-01-01T00:00:00.000Z', 'version', 1)),
-    (comment_task_id, jsonb_build_object('_id', comment_task_id, 'targetType', 'comment', 'targetId', comment_id, 'status', 'running', 'leaseId', 'lease:comment', 'leaseExpiresAt', '2099-01-01T00:00:00.000Z', 'version', 1)),
-    (pending_parent_task_id, jsonb_build_object('_id', pending_parent_task_id, 'targetType', 'comment', 'targetId', 'comment:review-int-pending-parent', 'status', 'running', 'leaseId', 'lease:pending-parent', 'leaseExpiresAt', '2099-01-01T00:00:00.000Z', 'version', 1)),
-    (bad_asset_task_id, jsonb_build_object('_id', bad_asset_task_id, 'targetType', 'post', 'targetId', bad_asset_post_id, 'postVersion', 1, 'status', 'running', 'leaseId', 'lease:bad-asset', 'leaseExpiresAt', '2099-01-01T00:00:00.000Z', 'version', 1));
+    (task_id, jsonb_build_object('_id', task_id, 'clubId', 'heiguang', 'targetType', 'post', 'targetId', post_id, 'postVersion', 1, 'status', 'running', 'leaseId', lease_id, 'leaseExpiresAt', '2099-01-01T00:00:00.000Z', 'version', 1)),
+    (stale_task_id, jsonb_build_object('_id', stale_task_id, 'clubId', 'heiguang', 'targetType', 'post', 'targetId', reject_post_id, 'postVersion', 1, 'status', 'running', 'leaseId', 'lease:stale', 'leaseExpiresAt', '2020-01-01T00:00:00.000Z', 'version', 1)),
+    (reject_task_id, jsonb_build_object('_id', reject_task_id, 'clubId', 'heiguang', 'targetType', 'post', 'targetId', reject_post_id, 'postVersion', 1, 'status', 'running', 'leaseId', 'lease:reject', 'leaseExpiresAt', '2099-01-01T00:00:00.000Z', 'version', 1)),
+    (comment_task_id, jsonb_build_object('_id', comment_task_id, 'clubId', 'heiguang', 'targetType', 'comment', 'targetId', comment_id, 'status', 'running', 'leaseId', 'lease:comment', 'leaseExpiresAt', '2099-01-01T00:00:00.000Z', 'version', 1)),
+    (pending_parent_task_id, jsonb_build_object('_id', pending_parent_task_id, 'clubId', 'heiguang', 'targetType', 'comment', 'targetId', 'comment:review-int-pending-parent', 'status', 'running', 'leaseId', 'lease:pending-parent', 'leaseExpiresAt', '2099-01-01T00:00:00.000Z', 'version', 1)),
+    (bad_asset_task_id, jsonb_build_object('_id', bad_asset_task_id, 'clubId', 'heiguang', 'targetType', 'post', 'targetId', bad_asset_post_id, 'postVersion', 1, 'status', 'running', 'leaseId', 'lease:bad-asset', 'leaseExpiresAt', '2099-01-01T00:00:00.000Z', 'version', 1));
 
   result := public.hg_finish_review(task_id, lease_id, 1, 'approve', '');
   IF result->>'status' <> 'passed' OR result->>'targetStatus' <> 'published' THEN

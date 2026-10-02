@@ -63,13 +63,13 @@ function reset() {
   calls.length = 0;
   posts = {
     'post-1': {
-      _id: 'post-1', ownerId: 'u-author', status: constants.POST_STATUS.PENDING,
+      _id: 'post-1', clubId: 'heiguang', ownerId: 'u-author', status: constants.POST_STATUS.PENDING,
       version: 3, title: '标题', body: '正文', assetIds: [],
     },
   };
   comments = {
     'comment-1': {
-      _id: 'comment-1', ownerId: 'u-commenter', postId: 'post-1',
+      _id: 'comment-1', clubId: 'heiguang', ownerId: 'u-commenter', postId: 'post-1',
       status: constants.POST_STATUS.PENDING, version: 2, body: '回应',
     },
   };
@@ -85,7 +85,7 @@ function reset() {
 
 function postTask() {
   return {
-    _id: 'task-post-1', targetType: 'post', targetId: 'post-1', postVersion: 3,
+    _id: 'task-post-1', clubId: 'heiguang', targetType: 'post', targetId: 'post-1', postVersion: 3,
     status: constants.REVIEW_TASK_STATUS.RUNNING, leaseId: 'lease-1',
     leaseExpiresAt: new Date(Date.now() + 60_000),
   };
@@ -93,7 +93,7 @@ function postTask() {
 
 function commentTask() {
   return {
-    _id: 'task-comment-1', targetType: 'comment', targetId: 'comment-1',
+    _id: 'task-comment-1', clubId: 'heiguang', targetType: 'comment', targetId: 'comment-1',
     status: constants.REVIEW_TASK_STATUS.RUNNING, leaseId: 'lease-2',
     leaseExpiresAt: new Date(Date.now() + 60_000),
   };
@@ -116,6 +116,7 @@ test('安全检查通过后，post review 只调用 hg_finish_review 并传 leas
       p_expected_version: 3,
       p_decision: 'approve',
       p_reason: '',
+      p_club_id: 'heiguang',
     },
   });
   assert.equal(task.status, constants.REVIEW_TASK_STATUS.PASSED);
@@ -168,14 +169,14 @@ test('安全检查明确拒绝时原子标记 failed，服务异常/存疑不绕
 test('未验证附件只等待，绑定或归属异常不会发布', async () => {
   reset();
   posts['post-1'].assetIds = ['asset-1'];
-  assets = [{ _id: 'asset-1', status: constants.ASSET_STATUS.UPLOADED, ownerId: 'u-author', postId: 'post-1' }];
+  assets = [{ _id: 'asset-1', clubId: 'heiguang', status: constants.ASSET_STATUS.UPLOADED, ownerId: 'u-author', postId: 'post-1' }];
   const waiting = await review.reviewPost(postTask());
   assert.equal(waiting.status, constants.REVIEW_TASK_STATUS.QUEUED);
   assert.equal(calls.length, 0);
 
   reset();
   posts['post-1'].assetIds = ['asset-1'];
-  assets = [{ _id: 'asset-1', status: constants.ASSET_STATUS.VERIFIED, ownerId: 'other', postId: 'post-1' }];
+  assets = [{ _id: 'asset-1', clubId: 'heiguang', status: constants.ASSET_STATUS.VERIFIED, ownerId: 'other', postId: 'post-1' }];
   const rejected = await review.reviewPost(postTask());
   assert.equal(rejected.status, constants.REVIEW_TASK_STATUS.FAILED);
   assert.equal(calls[1].args.p_decision, 'reject');

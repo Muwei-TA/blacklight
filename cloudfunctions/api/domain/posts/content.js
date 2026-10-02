@@ -6,7 +6,6 @@ const {
   VISIBILITY,
   IDENTITY_MODE,
   ASSET_STATUS,
-  DEFAULT_CLUB_ID,
 } = require('../../shared/constants');
 const policies = require('../../shared/policies');
 const validators = require('../../shared/validators');
@@ -31,6 +30,7 @@ const CATEGORY_TEXT = {
  * 任一步失败都不留"列表有帖子但附件还属于临时用户"的中间态。
  */
 async function createPost(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
   if (!policies.canUsePublishing(ctx.viewer, ctx.capabilities)) throw errors.forbidden({ reason: 'publishing unavailable' });
 
@@ -46,9 +46,9 @@ async function createPost(payload, ctx) {
 
   // 附件与话题互不依赖：并行取回后再校验，缩短发布链路的串行开销
   const [assets, topic, board] = await Promise.all([
-    input.assetIds.length > 0 ? db.findByIds(COLLECTIONS.assets, input.assetIds) : Promise.resolve([]),
-    input.topicId ? db.findOneById(COLLECTIONS.topics, input.topicId) : Promise.resolve(null),
-    input.boardId ? db.findOneById(COLLECTIONS.boards, input.boardId) : Promise.resolve(null),
+    input.assetIds.length > 0 ? db.findByIds(COLLECTIONS.assets, input.assetIds, clubId) : Promise.resolve([]),
+    input.topicId ? db.findOneById(COLLECTIONS.topics, input.topicId, clubId) : Promise.resolve(null),
+    input.boardId ? db.findOneById(COLLECTIONS.boards, input.boardId, clubId) : Promise.resolve(null),
   ]);
 
   // 校验附件归属与状态：只能绑定本人已验证的附件
@@ -57,6 +57,7 @@ async function createPost(payload, ctx) {
     if (assets.length !== input.assetIds.length) throw errors.invalidInput('附件不存在', { field: 'assetIds' });
 
     for (const asset of assets) {
+      if (asset.clubId !== clubId) throw errors.notAccessible({ assetId: asset._id });
       if (asset.ownerId !== ctx.viewer.userId) throw errors.forbidden({ reason: 'asset owner mismatch' });
       if (asset.status !== ASSET_STATUS.VERIFIED) throw errors.pendingMedia({ assetId: asset._id });
       if (asset.mediaType === 'video') hasVideo = true;
@@ -85,7 +86,7 @@ async function createPost(payload, ctx) {
 
   const postId = randomUUID();
   const post = {
-      clubId: DEFAULT_CLUB_ID,
+      clubId,
       ownerId: ctx.viewer.userId,
       kind: input.kind,
       category: input.kind === 'article' ? 'article' : payload.category || 'life',
@@ -110,17 +111,18 @@ async function createPost(payload, ctx) {
   let aliasDoc = null;
   if (input.identityMode === IDENTITY_MODE.ANONYMOUS) {
     const { alias, aliasKey } = anonymity.deriveAlias(postId, ctx.viewer.userId, process.env.ANON_ALIAS_SECRET);
-    aliasDoc = { _id: randomUUID(), threadId: postId, userId: ctx.viewer.userId, alias, aliasKey, isThreadAuthor: true, createdAt: post.createdAt };
+    aliasDoc = { _id: randomUUID(), clubId, threadId: postId, userId: ctx.viewer.userId, alias, aliasKey, isThreadAuthor: true, createdAt: post.createdAt };
   }
   const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, category: post.category })).digest('hex');
   try {
     const created = await db.getDb().rpc('hg_create_post', {
       p_key: `${ctx.viewer.userId}:createPost:${idempotencyKey}`,
       p_hash: fingerprint, p_post: post, p_alias: aliasDoc,
+      p_club_id: clubId,
     });
     if (created.state !== 'private_saved') {
       await foregroundReview.runOwnedReview('post', created.id, ctx).catch(() => null);
-      const current = await db.findOneById(COLLECTIONS.posts, created.id);
+      const current = await db.findOneById(COLLECTIONS.posts, created.id, clubId);
       return { ...created, state: current?.status || 'pending', version: current?.version || created.version };
     }
     return created;
@@ -132,13 +134,14 @@ async function createPost(payload, ctx) {
 
 /** PATCH /posts/{id}/resubmit —— 只修改被退回内容的文字，保留原附件与受众。 */
 async function resubmitRejectedPost(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   const id = validators.requireId(payload.id, 'id');
   const expectedVersion = Number(payload.expectedVersion);
   if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
     throw errors.invalidInput('缺少版本号', { field: 'expectedVersion' });
   }
   const idempotencyKey = validators.requireString(payload.idempotencyKey, '请求标识', { max: 120 });
-  const post = await db.findOneById(COLLECTIONS.posts, id);
+  const post = await db.findOneById(COLLECTIONS.posts, id, clubId);
   if (!post || post.ownerId !== ctx.viewer.userId) throw errors.notAccessible({ postId: id });
   if (!policies.canUsePublishing(ctx.viewer, ctx.capabilities)
     || (post.status === POST_STATUS.REJECTED
@@ -168,9 +171,10 @@ async function resubmitRejectedPost(payload, ctx) {
       p_expected_version: expectedVersion,
       p_title: input.title,
       p_body: input.body,
+      p_club_id: clubId,
     });
     await foregroundReview.runOwnedReview('post', id, ctx).catch(() => null);
-    const current = await db.findOneById(COLLECTIONS.posts, id);
+    const current = await db.findOneById(COLLECTIONS.posts, id, clubId);
     return { ...result, state: current?.status || result.state, version: current?.version || result.version };
   } catch (err) {
     if (/IDEMPOTENCY_|VERSION_CONFLICT|POST_NOT_REJECTED|ASSET_BINDING_CONFLICT/.test(err.message)) {
@@ -183,12 +187,13 @@ async function resubmitRejectedPost(payload, ctx) {
 
 /** PATCH /posts/{id}/visibility —— 首版只允许缩小 */
 async function changeVisibility(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   const id = validators.requireId(payload.id, 'id');
   const next = validators.requireEnum(payload.visibility, 'visibility', VISIBILITY);
   const expectedVersion = Number(payload.expectedVersion);
   if (!Number.isInteger(expectedVersion)) throw errors.invalidInput('缺少版本号', { field: 'expectedVersion' });
 
-  const post = await db.findOneById(COLLECTIONS.posts, id);
+  const post = await db.findOneById(COLLECTIONS.posts, id, clubId);
   if (!policies.canReadPost(ctx.viewer, post)) throw errors.notAccessible({ postId: id });
   if (!policies.canChangeVisibility(ctx.viewer, post, next)) {
     throw errors.forbidden({ reason: 'visibility can only shrink' });
@@ -199,12 +204,12 @@ async function changeVisibility(payload, ctx) {
     ...(next === VISIBILITY.PRIVATE ? { boardId: '' } : {}),
     // 权限版本号递增：用于媒体链接与缓存失效
     permissionVersion: (post.permissionVersion || 0) + 1,
-  });
+  }, clubId);
 
   // 缩小范围后清理聚合入口：文集目录与收藏占位
   await db
-    .coll(COLLECTIONS.collectionEntries)
-    .where({ postId: id })
+    .coll(COLLECTIONS.collectionEntries, clubId)
+    .where({ clubId, postId: id })
     .remove()
     .catch(() => {});
 
@@ -213,11 +218,12 @@ async function changeVisibility(payload, ctx) {
 
 /** DELETE /posts/{id} */
 async function deletePost(payload, ctx) {
+  const clubId = ctx.viewer.clubId;
   const id = validators.requireId(payload.id, 'id');
   const expectedVersion = Number(payload.expectedVersion);
   if (!Number.isInteger(expectedVersion)) throw errors.invalidInput('缺少版本号', { field: 'expectedVersion' });
 
-  const post = await db.findOneById(COLLECTIONS.posts, id);
+  const post = await db.findOneById(COLLECTIONS.posts, id, clubId);
   if (!policies.canReadPost(ctx.viewer, post)) throw errors.notAccessible({ postId: id });
   if (!policies.canDeletePost(ctx.viewer, post)) throw errors.forbidden({ reason: 'not owner' });
 
@@ -225,25 +231,25 @@ async function deletePost(payload, ctx) {
     status: POST_STATUS.DELETED,
     deletedAt: db.serverDate(),
     permissionVersion: (post.permissionVersion || 0) + 1,
-  });
+  }, clubId);
 
   // 媒体权限回收 + 异步物理清理交给 worker
   await db
-    .coll(COLLECTIONS.assets)
-    .where({ postId: id })
+    .coll(COLLECTIONS.assets, clubId)
+    .where({ clubId, postId: id })
     .update({ data: { status: 'revoked', updatedAt: db.serverDate() } })
     .catch(() => {});
 
   await db
-    .coll(COLLECTIONS.collectionEntries)
-    .where({ postId: id })
+    .coll(COLLECTIONS.collectionEntries, clubId)
+    .where({ clubId, postId: id })
     .remove()
     .catch(() => {});
 
   // 原帖与旗下回应的共鸣记录一并回收
   await db
-    .coll(COLLECTIONS.reactions)
-    .where({ postId: id })
+    .coll(COLLECTIONS.reactions, clubId)
+    .where({ clubId, postId: id })
     .remove()
     .catch(() => {});
 

@@ -126,7 +126,7 @@ async function verifySnapshot(snapshotDir, migrationSet) {
   }
   if (manifest.schema?.fingerprint !== migrationSet.fingerprint
     || JSON.stringify(manifest.schema?.migrations) !== JSON.stringify(migrationSet.migrations)) {
-    throw new Error('snapshot migration fingerprint mismatch');
+    throw new Error('snapshot migration fingerprint mismatch; restore with its matching migration set, apply pending migrations in order, then export a new snapshot');
   }
   if (!Array.isArray(manifest.tables) || manifest.tables.length !== migrationSet.tables.length) {
     throw new Error('snapshot table inventory mismatch');

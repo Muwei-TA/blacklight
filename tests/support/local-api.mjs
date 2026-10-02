@@ -41,6 +41,7 @@ function matches(doc, query = {}) {
     if (value && value.$op) {
       const expected = scalar(value.value);
       if (value.$op === 'in') return expected.includes(actual);
+      if (value.$op === 'nin') return !expected.includes(actual);
       if (value.$op === 'exists') return Object.hasOwn(doc, key) === expected;
       if (value.$op === 'regex') {
         try { return new RegExp(expected, value.options || '').test(String(actual || '')); } catch (_) { return false; }
@@ -91,16 +92,16 @@ export function createCommentMemoryDatabase(seed = {}) {
       createdAt: '2026-09-26T00:00:00.000Z',
     }],
     hg_comments: [
-      { _id: 'c1', postId: 'post-1', ownerId: 'user-1', replyToId: '', body: 'member-1 的一级回应',
+      { _id: 'c1', clubId: 'heiguang', postId: 'post-1', ownerId: 'user-1', replyToId: '', body: 'member-1 的一级回应',
         identityMode: 'named', status: 'published', version: 1, reactionCount: 0,
         createdAt: '2026-09-26T00:00:01.000Z' },
-      { _id: 'c2', postId: 'post-1', ownerId: 'user-2', replyToId: 'c1', body: 'member-2 的回复',
+      { _id: 'c2', clubId: 'heiguang', postId: 'post-1', ownerId: 'user-2', replyToId: 'c1', body: 'member-2 的回复',
         identityMode: 'named', status: 'published', version: 1, reactionCount: 0,
         createdAt: '2026-09-26T00:00:02.000Z' },
-      { _id: 'c3', postId: 'post-1', ownerId: 'user-2', replyToId: '', body: 'member-2 的一级回应',
+      { _id: 'c3', clubId: 'heiguang', postId: 'post-1', ownerId: 'user-2', replyToId: '', body: 'member-2 的一级回应',
         identityMode: 'named', status: 'published', version: 1, reactionCount: 0,
         createdAt: '2026-09-26T00:00:03.000Z' },
-      { _id: 'c4', postId: 'post-1', ownerId: 'user-1', replyToId: '', body: 'member-1 的待审回应',
+      { _id: 'c4', clubId: 'heiguang', postId: 'post-1', ownerId: 'user-1', replyToId: '', body: 'member-1 的待审回应',
         identityMode: 'named', status: 'pending', version: 1,
         createdAt: '2026-09-26T00:00:04.000Z' },
     ],
@@ -114,7 +115,7 @@ export function createCommentMemoryDatabase(seed = {}) {
   let paginationCalls = 0;
   const rows = (table) => store.get(table) || [];
   const commands = Object.fromEntries(
-    ['in', 'exists', 'neq', 'lt', 'lte', 'gt', 'gte', 'inc'].map((op) => [op, (value) => ({ $op: op, value })]),
+    ['in', 'nin', 'exists', 'neq', 'lt', 'lte', 'gt', 'gte', 'inc'].map((op) => [op, (value) => ({ $op: op, value })]),
   );
 
   const db = {
@@ -132,6 +133,9 @@ export function createCommentMemoryDatabase(seed = {}) {
         async get() {
           const found = sortRows(rows(table).filter((doc) => matches(doc, this.filter)), this.order).slice(0, this.take);
           return { data: clone(found) };
+        },
+        async count() {
+          return { total: rows(table).filter((doc) => matches(doc, this.filter)).length };
         },
         async add({ data }) {
           if (rows(table).some((doc) => doc._id === data._id)) {
@@ -184,6 +188,37 @@ export function createCommentMemoryDatabase(seed = {}) {
     getDb() {
       return {
         async rpc(name, args) {
+          if (name === 'hg_user_clubs') {
+            const memberships = rows('hg_memberships').filter((entry) => entry.userId === args.p_actor_id
+              && ['active', 'removed'].includes(entry.status));
+            const applications = rows('hg_membership_applications').filter((entry) => entry.userId === args.p_actor_id
+              && ['pending', 'rejected'].includes(entry.status));
+            const byClub = new Map();
+            for (const membership of memberships.filter((entry) => entry.status === 'active')) {
+              byClub.set(membership.clubId, { membership, memberStatus: 'active' });
+            }
+            for (const application of applications.filter((entry) => entry.status === 'pending')) {
+              if (!byClub.has(application.clubId)) byClub.set(application.clubId, { application, memberStatus: 'pending' });
+            }
+            for (const membership of memberships.filter((entry) => entry.status === 'removed')) {
+              if (!byClub.has(membership.clubId)) byClub.set(membership.clubId, { memberStatus: 'removed' });
+            }
+            for (const application of applications.filter((entry) => entry.status === 'rejected')) {
+              if (!byClub.has(application.clubId)) byClub.set(application.clubId, { memberStatus: 'rejected' });
+            }
+            return { items: [...byClub.entries()].flatMap(([clubId, entry]) => {
+              const club = rows('hg_club_config').find((entry) => entry._id === clubId);
+              if (!club) return [];
+              return [{
+                clubId,
+                name: club.name || '',
+                description: club.description || '',
+                status: club.status || (clubId === 'heiguang' ? 'active' : 'paused'),
+                role: entry.memberStatus === 'active' ? entry.membership.role : null,
+                memberStatus: entry.memberStatus,
+              }];
+            }) };
+          }
           if (name === 'hg_create_board') {
             const actorId = args.p_actor_id;
             const member = rows('hg_memberships').find((entry) => entry.userId === actorId
@@ -270,7 +305,7 @@ export function createCommentMemoryDatabase(seed = {}) {
             const existing = rows('hg_reactions').some((relation) => relation._id === relationId);
             let changed = false;
             if (next && !existing) {
-              rows('hg_reactions').push({ _id: relationId, userId, postId,
+              rows('hg_reactions').push({ _id: relationId, clubId: args.p_club_id, userId, postId,
                 type: 'resonance', ...(commentId ? { commentId } : {}), createdAt: db.serverDate() });
               changed = true;
             } else if (!next && existing) {

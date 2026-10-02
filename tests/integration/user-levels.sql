@@ -27,6 +27,13 @@ BEGIN
     RAISE EXCEPTION 'XP ledger must remain private to service_role';
   END IF;
 
+  INSERT INTO public.hg_users (id, doc) VALUES
+    (actor_id, jsonb_build_object('_id', actor_id, 'status', 'active')),
+    (other_id, jsonb_build_object('_id', other_id, 'status', 'active')),
+    (blocked_id, jsonb_build_object('_id', blocked_id, 'status', 'active')),
+    (auto_author_id, jsonb_build_object('_id', auto_author_id, 'status', 'active')),
+    (manual_author_id, jsonb_build_object('_id', manual_author_id, 'status', 'active'));
+
   INSERT INTO public.hg_memberships (id, doc) VALUES
     (actor_id || ':heiguang', jsonb_build_object('_id', actor_id || ':heiguang', 'userId', actor_id, 'clubId', 'heiguang', 'role', 'member', 'status', 'active')),
     (other_id || ':heiguang', jsonb_build_object('_id', other_id || ':heiguang', 'userId', other_id, 'clubId', 'heiguang', 'role', 'member', 'status', 'active')),
@@ -44,16 +51,13 @@ BEGIN
 
   -- Existing published records and non-status edits are not retroactively rewarded.
   INSERT INTO public.hg_comments (id, doc) VALUES
-    (preexisting_comment_id, jsonb_build_object('_id', preexisting_comment_id, 'postId', 'user-levels-int-post-1', 'ownerId', actor_id, 'status', 'published', 'identityMode', 'anonymous')),
-    (reaction_comment_id, jsonb_build_object('_id', reaction_comment_id, 'postId', 'user-levels-int-post-1', 'ownerId', other_id, 'status', 'published', 'identityMode', 'anonymous'));
+    (preexisting_comment_id, jsonb_build_object('_id', preexisting_comment_id, 'clubId', 'heiguang', 'postId', 'user-levels-int-post-1', 'ownerId', actor_id, 'status', 'published', 'identityMode', 'anonymous')),
+    (reaction_comment_id, jsonb_build_object('_id', reaction_comment_id, 'clubId', 'heiguang', 'postId', 'user-levels-int-post-1', 'ownerId', other_id, 'status', 'published', 'identityMode', 'anonymous'));
   UPDATE public.hg_comments SET doc = doc || jsonb_build_object('reactionCount', 0)
   WHERE id = preexisting_comment_id;
   IF EXISTS (SELECT 1 FROM public.hg_user_xp_events WHERE user_id = actor_id) THEN
     RAISE EXCEPTION 'published comment update created a retroactive reward';
   END IF;
-
-  INSERT INTO public.hg_users (id, doc)
-  VALUES (actor_id, jsonb_build_object('_id', actor_id, 'status', 'active'));
 
   answer := public.hg_user_levels_check_in(actor_id);
   IF answer->>'awardedXp' <> '5' OR answer->>'totalXp' <> '5'
@@ -83,7 +87,7 @@ BEGIN
     post_id := 'user-levels-int-post-' || CASE WHEN i <= 2 THEN 1 ELSE i - 1 END;
     comment_id := 'user-levels-int-comment-' || i;
     INSERT INTO public.hg_comments (id, doc)
-    VALUES (comment_id, jsonb_build_object('_id', comment_id, 'postId', post_id, 'ownerId', actor_id, 'status', 'pending', 'identityMode', 'anonymous'));
+    VALUES (comment_id, jsonb_build_object('_id', comment_id, 'clubId', 'heiguang', 'postId', post_id, 'ownerId', actor_id, 'status', 'pending', 'identityMode', 'anonymous'));
     UPDATE public.hg_comments
     SET doc = doc || jsonb_build_object('status', 'published')
     WHERE id = comment_id;
@@ -159,18 +163,18 @@ BEGIN
     ('user-levels-int-auto-post', jsonb_build_object('_id', 'user-levels-int-auto-post', 'ownerId', other_id, 'clubId', 'heiguang', 'visibility', 'club', 'status', 'published', 'commentCount', 0)),
     ('user-levels-int-manual-post', jsonb_build_object('_id', 'user-levels-int-manual-post', 'ownerId', other_id, 'clubId', 'heiguang', 'visibility', 'club', 'status', 'published', 'commentCount', 0));
   INSERT INTO public.hg_comments (id, doc) VALUES
-    ('user-levels-int-auto-comment', jsonb_build_object('_id', 'user-levels-int-auto-comment', 'postId', 'user-levels-int-auto-post', 'ownerId', auto_author_id, 'status', 'pending', 'version', 1)),
-    ('user-levels-int-manual-comment', jsonb_build_object('_id', 'user-levels-int-manual-comment', 'postId', 'user-levels-int-manual-post', 'ownerId', manual_author_id, 'status', 'pending', 'version', 1));
+    ('user-levels-int-auto-comment', jsonb_build_object('_id', 'user-levels-int-auto-comment', 'clubId', 'heiguang', 'postId', 'user-levels-int-auto-post', 'ownerId', auto_author_id, 'status', 'pending', 'version', 1)),
+    ('user-levels-int-manual-comment', jsonb_build_object('_id', 'user-levels-int-manual-comment', 'clubId', 'heiguang', 'postId', 'user-levels-int-manual-post', 'ownerId', manual_author_id, 'status', 'pending', 'version', 1));
   INSERT INTO public.hg_review_tasks (id, doc) VALUES (
     'user-levels-int-auto-review', jsonb_build_object(
-      '_id', 'user-levels-int-auto-review', 'targetType', 'comment',
+      '_id', 'user-levels-int-auto-review', 'clubId', 'heiguang', 'targetType', 'comment',
       'targetId', 'user-levels-int-auto-comment', 'postVersion', 1,
       'status', 'running', 'attempts', 0, 'leaseId', 'user-levels-int-lease',
       'leaseExpiresAt', (transaction_timestamp() + interval '5 minutes')::text,
       'createdAt', transaction_timestamp()::text
     )
   );
-  answer := public.hg_finish_review('user-levels-int-auto-review', 'user-levels-int-lease', 1, 'approve', '');
+  answer := public.hg_finish_review('user-levels-int-auto-review', 'user-levels-int-lease', 1, 'approve', '', 'heiguang');
   IF answer->>'targetStatus' <> 'published'
      OR (SELECT total_xp FROM public.hg_user_xp_accounts WHERE user_id = auto_author_id) <> 3 THEN
     RAISE EXCEPTION 'automatic review approval did not award XP atomically: %', answer;
@@ -179,7 +183,7 @@ BEGIN
   IF to_regprocedure('public.hg_moderate_legacy(text,text,jsonb)') IS NOT NULL THEN
     INSERT INTO public.hg_review_tasks (id, doc) VALUES (
       'user-levels-int-manual-review', jsonb_build_object(
-        '_id', 'user-levels-int-manual-review', 'targetType', 'comment',
+        '_id', 'user-levels-int-manual-review', 'clubId', 'heiguang', 'targetType', 'comment',
         'targetId', 'user-levels-int-manual-comment', 'postVersion', '1',
         'status', 'manual', 'attempts', 0, 'createdAt', transaction_timestamp()::text
       )
@@ -200,7 +204,7 @@ BEGIN
 
   -- Removed members cannot earn XP through a status transition.
   INSERT INTO public.hg_comments (id, doc)
-  VALUES ('user-levels-int-removed-comment', jsonb_build_object('_id', 'user-levels-int-removed-comment', 'postId', 'user-levels-int-post-1', 'ownerId', blocked_id, 'status', 'pending'));
+  VALUES ('user-levels-int-removed-comment', jsonb_build_object('_id', 'user-levels-int-removed-comment', 'clubId', 'heiguang', 'postId', 'user-levels-int-post-1', 'ownerId', blocked_id, 'status', 'pending'));
   UPDATE public.hg_comments SET doc = doc || jsonb_build_object('status', 'published')
   WHERE id = 'user-levels-int-removed-comment';
   IF EXISTS (SELECT 1 FROM public.hg_user_xp_events WHERE user_id = blocked_id) THEN

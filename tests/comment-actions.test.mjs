@@ -12,7 +12,7 @@ const presenters = require('../shared/presenters.js');
 const anonymity = require('../shared/anonymity.js');
 const stamp = (n) => new Date(Date.UTC(2026, 8, 24, 0, 0, n)).toISOString();
 const memberViewer = (userId) => policies.buildViewer({
-  userId, role: constants.ROLE.MEMBER, memberStatus: constants.MEMBER_STATUS.ACTIVE,
+  userId, clubId: constants.DEFAULT_CLUB_ID, role: constants.ROLE.MEMBER, memberStatus: constants.MEMBER_STATUS.ACTIVE,
 });
 const ctxFor = (userId) => ({ viewer: memberViewer(userId), user: { _id: userId, displayName: '成员' },
   capabilities: { publishing: true }, now: Date.now() });
@@ -26,13 +26,13 @@ function harness() {
       title: '', body: '正文', visibility: 'club', identityMode: 'named', status: 'published',
       commentsEnabled: true, version: 1, reactionCount: 0, commentCount: 3, createdAt: stamp(0) }],
     hg_comments: [
-      { _id: 'c1', postId: 'post-1', ownerId: 'user-1', replyToId: '', body: '一级回应',
+      { _id: 'c1', clubId: 'heiguang', postId: 'post-1', ownerId: 'user-1', replyToId: '', body: '一级回应',
         identityMode: 'named', status: 'published', version: 1, createdAt: stamp(1) },
-      { _id: 'c2', postId: 'post-1', ownerId: 'user-2', replyToId: 'c1', body: '定向回复',
+      { _id: 'c2', clubId: 'heiguang', postId: 'post-1', ownerId: 'user-2', replyToId: 'c1', body: '定向回复',
         identityMode: 'named', status: 'published', version: 1, createdAt: stamp(2) },
-      { _id: 'c3', postId: 'post-1', ownerId: 'user-2', replyToId: '', body: '另一条一级回应',
+      { _id: 'c3', clubId: 'heiguang', postId: 'post-1', ownerId: 'user-2', replyToId: '', body: '另一条一级回应',
         identityMode: 'named', status: 'published', version: 1, createdAt: stamp(3) },
-      { _id: 'c4', postId: 'post-1', ownerId: 'user-1', replyToId: '', body: '待审回应',
+      { _id: 'c4', clubId: 'heiguang', postId: 'post-1', ownerId: 'user-1', replyToId: '', body: '待审回应',
         identityMode: 'named', status: 'pending', version: 1, createdAt: stamp(4) },
     ],
     hg_reactions: [], hg_bookmarks: [], hg_topics: [], hg_assets: [], hg_consents: [],
@@ -132,7 +132,7 @@ function harness() {
         const target = rows(commentId ? 'hg_comments' : 'hg_posts').find((doc) => doc._id === (commentId || postId));
         const existing = rows('hg_reactions').find((doc) => doc._id === id);
         if (next && !existing) {
-          rows('hg_reactions').push({ _id: id, userId, postId, ...(commentId ? { commentId } : {}) });
+          rows('hg_reactions').push({ _id: id, clubId: args.p_club_id, userId, postId, ...(commentId ? { commentId } : {}) });
           target.reactionCount = (target.reactionCount || 0) + 1;
         } else if (!next && existing) {
           store.set('hg_reactions', rows('hg_reactions').filter((doc) => doc._id !== id));
@@ -242,9 +242,9 @@ test('non-authors/version conflicts cannot delete; deleting pending does not dec
 test('F2 comment reactions cannot mark posts or crowd out another posts real reaction', async () => {
   const { posts, rows } = harness();
   rows('hg_posts').push({ ...rows('hg_posts')[0], _id: 'post-2' });
-  for (let n = 0; n < 30; n += 1) rows('hg_reactions').push({ _id: `r${n}`, userId: 'user-1', postId: 'post-1', commentId: `c${n}` });
-  rows('hg_reactions').push({ _id: 'user-1:post-2', userId: 'user-1', postId: 'post-2' });
-  rows('hg_bookmarks').push({ _id: 'user-1:post-1', userId: 'user-1', postId: 'post-1' });
+  for (let n = 0; n < 30; n += 1) rows('hg_reactions').push({ _id: `r${n}`, clubId: 'heiguang', userId: 'user-1', postId: 'post-1', commentId: `c${n}` });
+  rows('hg_reactions').push({ _id: 'user-1:post-2', clubId: 'heiguang', userId: 'user-1', postId: 'post-2' });
+  rows('hg_bookmarks').push({ _id: 'user-1:post-1', clubId: 'heiguang', userId: 'user-1', postId: 'post-1' });
   const cards = await posts.hydrateCards(rows('hg_posts'), ctxFor('user-1'));
   assert.equal(cards[0].viewer.reacted, false);
   assert.equal(cards[1].viewer.reacted, true);

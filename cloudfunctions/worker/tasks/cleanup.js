@@ -8,7 +8,7 @@
  * - 注销申请：停止展示后按保留期清理，任何一步失败都保留可重试状态
  */
 
-const { COLLECTIONS, ASSET_STATUS, POST_STATUS } = require('../shared/constants');
+const { COLLECTIONS, ASSET_STATUS } = require('../shared/constants');
 const db = require('../shared/db');
 const recovery = require('../recovery');
 
@@ -90,31 +90,47 @@ function cleanupFailureData(asset, error, now = Date.now()) {
   };
 }
 
-async function preserveRetryableAsset(asset, error, where, now = Date.now()) {
-  const result = await db
-    .coll(COLLECTIONS.assets)
-    .where({ _id: asset._id, ...where })
-    .update({ data: cleanupFailureData(asset, error, now) });
+function assetExpectedSnapshot(asset) {
+  const fields = [
+    'status', 'postId', 'cleanupState', 'cleanupClaimedAt', 'cleanupNextAttemptAt',
+    'createdAt', 'ownerId', 'fileId', 'cleanedFileId', 'reservedFileId',
+  ];
+  return Object.fromEntries(fields.map((field) => [
+    field,
+    Object.hasOwn(asset, field) ? asset[field] : { $missing: true },
+  ]));
+}
+
+async function cleanupAssetAction(asset, action, expected, patch = {}) {
+  return db.getDb().rpc('hg_cleanup_asset', {
+    p_club_id: asset.clubId,
+    p_asset_id: asset._id,
+    p_action: action,
+    p_expected: assetExpectedSnapshot(expected),
+    p_patch: patch,
+  });
+}
+
+async function preserveRetryableAsset(asset, error, now = Date.now()) {
+  const result = await cleanupAssetAction(
+    asset,
+    'retry',
+    asset,
+    cleanupFailureData(asset, error, now),
+  );
   return !!(result.stats && result.stats.updated === 1);
 }
 
-async function claimCleanupAsset(asset, where, now = Date.now()) {
-  const _ = db.command();
-  const cleanupCondition = { _id: asset._id, ...where };
-  if (asset.cleanupState === undefined) cleanupCondition.cleanupState = _.exists(false);
-  else cleanupCondition.cleanupState = asset.cleanupState;
-  const result = await db
-    .coll(COLLECTIONS.assets)
-    .where(cleanupCondition)
-    .update({
-      data: {
-        cleanupState: RUNNING_CLEANUP,
-        cleanupClaimedAt: new Date(recovery.nowMillis(now)),
-        cleanupLastError: '',
-        updatedAt: db.serverDate(),
-      },
-    });
-  return !!(result.stats && result.stats.updated === 1);
+async function claimCleanupAsset(asset, now = Date.now()) {
+  const claimAt = new Date(recovery.nowMillis(now)).toISOString();
+  const patch = {
+    cleanupState: RUNNING_CLEANUP,
+    cleanupClaimedAt: claimAt,
+    cleanupLastError: '',
+    updatedAt: db.serverDate(),
+  };
+  const result = await cleanupAssetAction(asset, 'claim', asset, patch);
+  return result.stats && result.stats.updated === 1 ? { ...asset, ...patch } : null;
 }
 
 function orphanStatuses() {
@@ -132,14 +148,16 @@ function orphanStatuses() {
  * 未绑定内容的附件：确认文件删除成功后才删记录。
  * 文件或记录写入失败时保留资产文档，下一轮按 cleanupNextAttemptAt 重试。
  */
-async function cleanupOrphanAssets() {
+async function cleanupOrphanAssets(clubId) {
+  if (!clubId) throw new Error('cleanup club is required');
   const _ = db.command();
   const now = Date.now();
   const cutoff = new Date(now - ORPHAN_ASSET_TTL);
 
   const res = await db
-    .coll(COLLECTIONS.assets)
+    .coll(COLLECTIONS.assets, clubId)
     .where({
+      clubId,
       postId: '',
       createdAt: _.lt(cutoff),
       status: _.in(orphanStatuses()),
@@ -156,35 +174,26 @@ async function cleanupOrphanAssets() {
     // Conditional claim prevents two cleanup invocations from deleting the
     // same file concurrently. A later post binding also makes the final
     // remove condition fail, preserving the record for inspection.
-    const claimed = await claimCleanupAsset(asset, { postId: '', status: asset.status }, now);
-    if (!claimed) {
+    const claimedAsset = await claimCleanupAsset(asset, now);
+    if (!claimedAsset) {
       skipped += 1;
       continue;
     }
 
     const deletion = await deleteFiles([asset.fileId, asset.cleanedFileId, asset.reservedFileId]);
     if (deletion.failed.length > 0) {
-      await preserveRetryableAsset(asset, new Error(deletion.failed[0].error), {
-        postId: '',
-        cleanupState: RUNNING_CLEANUP,
-      }, now);
+      await preserveRetryableAsset(claimedAsset, new Error(deletion.failed[0].error), now);
       retryable += 1;
       continue;
     }
 
-    const removedResult = await db
-      .coll(COLLECTIONS.assets)
-      .where({ _id: asset._id, postId: '', cleanupState: RUNNING_CLEANUP })
-      .remove();
+    const removedResult = await cleanupAssetAction(claimedAsset, 'remove_orphan', claimedAsset);
     if (removedResult.stats && removedResult.stats.removed === 1) {
       removed += 1;
     } else {
       // The file is already gone, but the record still needs a durable retry
       // marker. Do not silently report this as successful cleanup.
-      await preserveRetryableAsset(asset, new Error('asset record removal failed'), {
-        postId: '',
-        cleanupState: RUNNING_CLEANUP,
-      }, now);
+      await preserveRetryableAsset(claimedAsset, new Error('asset record removal failed'), now);
       retryable += 1;
     }
   }
@@ -196,11 +205,12 @@ async function cleanupOrphanAssets() {
  * 已删除内容的媒体：文件成功删除前始终保持 revoked，避免把数据库状态
  * 当成物理回收的证明。
  */
-async function cleanupDeletedPostAssets() {
+async function cleanupDeletedPostAssets(clubId) {
+  if (!clubId) throw new Error('cleanup club is required');
   const now = Date.now();
   const res = await db
-    .coll(COLLECTIONS.assets)
-    .where({ status: 'revoked' })
+    .coll(COLLECTIONS.assets, clubId)
+    .where({ clubId, status: 'revoked' })
     .limit(50)
     .get();
 
@@ -210,27 +220,20 @@ async function cleanupDeletedPostAssets() {
   let skipped = 0;
 
   for (const asset of assets) {
-    const claimed = await claimCleanupAsset(asset, { status: 'revoked' }, now);
-    if (!claimed) {
+    const claimedAsset = await claimCleanupAsset(asset, now);
+    if (!claimedAsset) {
       skipped += 1;
       continue;
     }
 
     const deletion = await deleteFiles([asset.fileId, asset.cleanedFileId, asset.reservedFileId]);
     if (deletion.failed.length > 0) {
-      await preserveRetryableAsset(asset, new Error(deletion.failed[0].error), {
-        status: 'revoked',
-        cleanupState: RUNNING_CLEANUP,
-      }, now);
+      await preserveRetryableAsset(claimedAsset, new Error(deletion.failed[0].error), now);
       retryable += 1;
       continue;
     }
 
-    const updated = await db
-      .coll(COLLECTIONS.assets)
-      .where({ _id: asset._id, status: 'revoked', cleanupState: RUNNING_CLEANUP })
-      .update({
-        data: {
+    const updated = await cleanupAssetAction(claimedAsset, 'purge', claimedAsset, {
           fileId: '',
           cleanedFileId: '',
           reservedFileId: '',
@@ -243,15 +246,11 @@ async function cleanupDeletedPostAssets() {
           cleanupClaimedAt: null,
           purgedAt: db.serverDate(),
           updatedAt: db.serverDate(),
-        },
-      });
+    });
     if (updated.stats && updated.stats.updated === 1) {
       purged += 1;
     } else {
-      await preserveRetryableAsset(asset, new Error('revoked asset state update failed'), {
-        status: 'revoked',
-        cleanupState: RUNNING_CLEANUP,
-      }, now);
+      await preserveRetryableAsset(claimedAsset, new Error('revoked asset state update failed'), now);
       retryable += 1;
     }
   }
@@ -259,19 +258,20 @@ async function cleanupDeletedPostAssets() {
   return { purged, retryable, skipped };
 }
 
-async function cleanupIdempotency() {
+async function cleanupIdempotency(clubId) {
+  if (!clubId) throw new Error('cleanup club is required');
   const _ = db.command();
   const cutoff = new Date(Date.now() - IDEMPOTENCY_TTL);
   const res = await db
-    .coll(COLLECTIONS.idempotency)
-    .where({ createdAt: _.lt(cutoff) })
+    .coll(COLLECTIONS.idempotency, clubId)
+    .where({ clubId, createdAt: _.lt(cutoff) })
     .limit(100)
     .get();
 
   let removed = 0;
   let retryable = 0;
   for (const item of res.data || []) {
-    const result = await db.coll(COLLECTIONS.idempotency).doc(item._id).remove();
+    const result = await db.coll(COLLECTIONS.idempotency, clubId).doc(item._id).remove();
     if (result.stats && result.stats.removed === 1) removed += 1;
     else retryable += 1;
   }
@@ -284,7 +284,8 @@ async function cleanupIdempotency() {
  * （如审计日志）不删除，但与身份解除关联。每一步都必须成功，失败
  * 时用户保持 deletion_processing，下一轮继续执行，不能写成已完成。
  */
-async function processAccountDeletions() {
+async function processAccountDeletions(clubIds) {
+  if (!Array.isArray(clubIds)) throw new Error('account deletion club list is required');
   const _ = db.command();
   const now = Date.now();
   const cutoff = new Date(now - DELETION_GRACE);
@@ -303,12 +304,15 @@ async function processAccountDeletions() {
     });
     if (!claimed.stats || claimed.stats.updated !== 1) continue;
     try {
-      await db.coll(COLLECTIONS.posts).where({ ownerId: user._id, status: _.neq(POST_STATUS.DELETED) }).update({ data: { status: POST_STATUS.DELETED, deletedAt: db.serverDate() } });
-      await db.coll(COLLECTIONS.assets).where({ ownerId: user._id, status: _.nin(['purged','revoked']) }).update({ data: { status: 'revoked', revokedAt: db.serverDate(), updatedAt: db.serverDate() } });
-      await db.coll(COLLECTIONS.memberships).where({ userId: user._id }).update({ data: { status: 'removed', removedAt: db.serverDate() } });
-      await cleanupDeletedPostAssets();
-      const files = await db.coll(COLLECTIONS.assets).where({ ownerId: user._id, status: _.neq('purged') }).count();
-      if (files.total) throw new Error('waiting for file deletion confirmation');
+      for (const clubId of clubIds) {
+        // hg_request_account_deletion already atomically hides posts, revokes
+        // owned assets and removes memberships across every club. Keep this
+        // loop read/cleanup-only so a paused, unrelated club with zero matches
+        // cannot block the global account completion.
+        await cleanupDeletedPostAssets(clubId);
+        const files = await db.coll(COLLECTIONS.assets, clubId).where({ clubId, ownerId: user._id, status: _.neq('purged') }).count();
+        if (files.total) throw new Error('waiting for file deletion confirmation');
+      }
       await db.getDb().rpc('hg_finish_account_deletion', { p_user: user._id, p_lease: leaseId });
       processed += 1;
     } catch (err) {

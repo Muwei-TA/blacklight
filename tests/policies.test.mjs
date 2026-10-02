@@ -12,33 +12,38 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const policies = require('../shared/policies.js');
-const { VISIBILITY, POST_STATUS, ROLE, MEMBER_STATUS, TOPIC_STATUS, BOARD_STATUS } = require('../shared/constants.js');
+const { VISIBILITY, POST_STATUS, ROLE, MEMBER_STATUS, TOPIC_STATUS, BOARD_STATUS, DEFAULT_CLUB_ID } = require('../shared/constants.js');
 const { assertNoIdentityLeak } = require('../shared/anonymity.js');
 const presenters = require('../shared/presenters.js');
 
-const guest = policies.buildViewer({});
+const guest = policies.buildViewer({ clubId: DEFAULT_CLUB_ID });
 const member = policies.buildViewer({
   userId: 'u_member',
+  clubId: DEFAULT_CLUB_ID,
   role: ROLE.MEMBER,
   memberStatus: MEMBER_STATUS.ACTIVE,
 });
 const other = policies.buildViewer({
   userId: 'u_other',
+  clubId: DEFAULT_CLUB_ID,
   role: ROLE.MEMBER,
   memberStatus: MEMBER_STATUS.ACTIVE,
 });
 const admin = policies.buildViewer({
   userId: 'u_admin',
+  clubId: DEFAULT_CLUB_ID,
   role: ROLE.ADMIN,
   memberStatus: MEMBER_STATUS.ACTIVE,
 });
 const moderator = policies.buildViewer({
   userId: 'u_mod',
+  clubId: DEFAULT_CLUB_ID,
   role: ROLE.MODERATOR,
   memberStatus: MEMBER_STATUS.ACTIVE,
 });
 const removed = policies.buildViewer({
   userId: 'u_removed',
+  clubId: DEFAULT_CLUB_ID,
   role: ROLE.MEMBER,
   memberStatus: MEMBER_STATUS.REMOVED,
 });
@@ -46,6 +51,7 @@ const removed = policies.buildViewer({
 function makePost(overrides = {}) {
   return {
     _id: 'p1',
+    clubId: DEFAULT_CLUB_ID,
     ownerId: 'u_member',
     kind: 'fragment',
     title: '',
@@ -73,6 +79,19 @@ test('访客可以读已发布的公开内容', () => {
 
 test('成员可以读社内内容', () => {
   assert.equal(policies.canReadPost(member, makePost()), true);
+});
+
+test('viewer role never crosses club boundaries for direct objects', () => {
+  const betaMember = policies.buildViewer({
+    userId: 'u_beta', clubId: 'beta', role: ROLE.MEMBER, memberStatus: MEMBER_STATUS.ACTIVE,
+  });
+  const betaPost = makePost({ clubId: 'beta', ownerId: 'u_member' });
+  assert.equal(policies.canReadPost(member, betaPost), false);
+  assert.equal(policies.canReadPost(betaMember, betaPost), true);
+  assert.equal(policies.canDeletePost(member, betaPost), false);
+  assert.equal(policies.canReadTopic(member, { clubId: 'beta', status: TOPIC_STATUS.ACTIVE }), false);
+  assert.equal(policies.canReadBoard(member, { clubId: 'beta', status: BOARD_STATUS.ACTIVE }), false);
+  assert.equal(policies.canReadCollection(member, { clubId: 'beta', visibility: VISIBILITY.CLUB }), false);
 });
 
 test('被移除的成员立即失去社内读权', () => {
@@ -166,6 +185,7 @@ test('只有作者能删除内容', () => {
 test('只有评论者能删除自己的回应', () => {
   const makeComment = (overrides = {}) => ({
     _id: 'c1',
+    clubId: DEFAULT_CLUB_ID,
     postId: 'p1',
     ownerId: 'u_member',
     replyToId: '',
@@ -233,6 +253,7 @@ test('禁言期间不能发帖和评论，过期后恢复', () => {
   const now = Date.now();
   const muted = policies.buildViewer({
     userId: 'u_member',
+    clubId: DEFAULT_CLUB_ID,
     role: ROLE.MEMBER,
     memberStatus: MEMBER_STATUS.ACTIVE,
     mutedUntil: new Date(now + 60_000).toISOString(),
@@ -260,20 +281,20 @@ test('申诉只允许作者对 hidden/rejected 内容发起', () => {
 });
 
 test('待审话题只有提交者与管理员可见', () => {
-  const pendingTopic = { _id: 't1', ownerId: 'u_member', status: TOPIC_STATUS.PENDING };
+  const pendingTopic = { _id: 't1', clubId: DEFAULT_CLUB_ID, ownerId: 'u_member', status: TOPIC_STATUS.PENDING };
   assert.equal(policies.canReadTopic(member, pendingTopic), true);
   assert.equal(policies.canReadTopic(other, pendingTopic), false);
   assert.equal(policies.canReadTopic(admin, pendingTopic), true);
 });
 
 test('归档话题可读但不可投稿', () => {
-  const archived = { _id: 't2', status: TOPIC_STATUS.ARCHIVED };
+  const archived = { _id: 't2', clubId: DEFAULT_CLUB_ID, status: TOPIC_STATUS.ARCHIVED };
   assert.equal(policies.canReadTopic(member, archived), true);
   assert.equal(policies.canPostToTopic(member, archived), false);
 });
 
 test('访客看不到社内话题', () => {
-  assert.equal(policies.canReadTopic(guest, { _id: 't3', status: TOPIC_STATUS.ACTIVE }), false);
+  assert.equal(policies.canReadTopic(guest, { _id: 't3', clubId: DEFAULT_CLUB_ID, status: TOPIC_STATUS.ACTIVE }), false);
 });
 
 test('active 板块仅有效成员可读，pending/rejected 仅创建者与管理员可读', () => {
@@ -301,11 +322,11 @@ test('板块投稿要求 active 板块与服务端发布能力', () => {
 });
 
 test('公开文集不能收录社内原帖', () => {
-  const publicCollection = { visibility: VISIBILITY.PUBLIC };
+  const publicCollection = { clubId: DEFAULT_CLUB_ID, visibility: VISIBILITY.PUBLIC };
   const clubPost = makePost({ visibility: VISIBILITY.CLUB });
   assert.equal(policies.canIncludeInCollection(publicCollection, clubPost), false);
 
-  const clubCollection = { visibility: VISIBILITY.CLUB };
+  const clubCollection = { clubId: DEFAULT_CLUB_ID, visibility: VISIBILITY.CLUB };
   assert.equal(policies.canIncludeInCollection(clubCollection, clubPost), true);
   // 公开帖可进社内文集（受众取交集，不扩大）
   assert.equal(policies.canIncludeInCollection(clubCollection, makePost({ visibility: VISIBILITY.PUBLIC })), true);
@@ -313,7 +334,7 @@ test('公开文集不能收录社内原帖', () => {
 
 test('仅自己内容不能被收录', () => {
   assert.equal(
-    policies.canIncludeInCollection({ visibility: VISIBILITY.CLUB }, makePost({ visibility: VISIBILITY.PRIVATE })),
+    policies.canIncludeInCollection({ clubId: DEFAULT_CLUB_ID, visibility: VISIBILITY.CLUB }, makePost({ visibility: VISIBILITY.PRIVATE })),
     false,
   );
 });

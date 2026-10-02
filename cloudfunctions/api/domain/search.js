@@ -25,6 +25,7 @@ function escapeRegex(text) {
 /** GET /search */
 async function search(payload, ctx) {
   const q = validators.validateSearchQuery(payload.q);
+  const clubId = ctx.viewer.clubId;
   const scope = validators.requireEnum(payload.scope || 'post', 'scope', ['post', 'topic']);
   const pageSize = validators.clampPageSize(payload.pageSize);
   const _ = db.command();
@@ -33,9 +34,10 @@ async function search(payload, ctx) {
   if (scope === 'topic') {
     if (!ctx.viewer.isMember) return { items: [], nextCursor: null };
     const res = await db
-      .coll(COLLECTIONS.topics)
+      .coll(COLLECTIONS.topics, clubId)
       .where(
         _.and([
+          { clubId },
           { status: _.in(['active', 'archived']) },
           _.or([{ title: pattern }, { description: pattern }]),
         ]),
@@ -67,9 +69,10 @@ async function search(payload, ctx) {
     ...scopeWhere,
     $or: [{ title: pattern }, { body: pattern }],
   };
-  const { items, hasMore } = await db.paginate(COLLECTIONS.posts, where, {
+  const { items, hasMore } = await db.paginate(COLLECTIONS.posts, { ...where, clubId }, {
     cursor: validators.parseCursor(payload.cursor),
     pageSize,
+    clubId,
   });
 
   // 二次复核（防御性：即使 where 写错，也不会漏出）
@@ -95,18 +98,20 @@ async function suggestions(payload, ctx) {
 /** GET /me/private-search —— 仅在自己的私密手记内查找 */
 async function searchPrivate(payload, ctx) {
   if (!ctx.viewer.isAuthenticated) throw errors.unauthenticated();
+  const clubId = ctx.viewer.clubId;
   const q = validators.validateSearchQuery(payload.q);
   const pattern = db.getDb().RegExp({ regexp: escapeRegex(q), options: 'i' });
 
   const { items, hasMore } = await db.paginate(
     COLLECTIONS.posts,
     {
+      clubId,
       ownerId: ctx.viewer.userId,
       visibility: VISIBILITY.PRIVATE,
       status: POST_STATUS.PUBLISHED,
       $or: [{ title: pattern }, { body: pattern }],
     },
-    { cursor: validators.parseCursor(payload.cursor), pageSize: validators.clampPageSize(payload.pageSize) },
+    { cursor: validators.parseCursor(payload.cursor), pageSize: validators.clampPageSize(payload.pageSize), clubId },
   );
 
   const posts = require('./posts');
