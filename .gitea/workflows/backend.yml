@@ -38,6 +38,11 @@ jobs:
         run: npm run lint
       - name: Unit tests
         run: npm test
+      - name: Install PostgreSQL client
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends postgresql-client
+          psql --version
       - name: PostgreSQL integration tests
         run: node --test --test-concurrency=1 tests/integration/comment-reaction-pg.test.mjs tests/integration/user-levels-pg.test.mjs
         env:
