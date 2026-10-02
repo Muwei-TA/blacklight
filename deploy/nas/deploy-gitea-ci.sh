@@ -150,6 +150,9 @@ wait_for_app() {
 wait_for_db || fail 'PostgreSQL did not become healthy; database data was preserved'
 compose stop api worker
 export NAS_WRITES_QUIESCED=1
+# This dedicated CI stack contains synthetic fixtures, never a migrated business snapshot.
+docker exec "$(compose ps --all --quiet db)" psql -X -v ON_ERROR_STOP=1 -U blacklight_admin -d blacklight -c \
+  "INSERT INTO public.hg_users(id,doc) SELECT 'synthetic-ci-backup-fixture', jsonb_build_object('_id','synthetic-ci-backup-fixture','status','active','displayName','Synthetic CI fixture') WHERE NOT EXISTS(SELECT 1 FROM public.hg_users)"
 if ! compose --profile maintenance run --rm --no-deps backup; then
   compose start api worker || true
   fail 'pre-migration backup/restore verification failed; existing schema was preserved'
