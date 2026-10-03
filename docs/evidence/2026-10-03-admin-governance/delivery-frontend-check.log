@@ -1,0 +1,7 @@
+
+> tdesign-miniprogram-starter@0.0.2 check
+> node scripts/check.mjs
+
+
+js: 80, json: 47, wxml: 42, pages: 30, pending: 0
+OK: 全部检查通过

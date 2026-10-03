@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "results": [
+    "paused-club target account can review and accept without management role",
+    "unaccepted recovery rejected",
+    "same developer cannot satisfy two-person check",
+    "second developer completes target-only team atomically",
+    "club stays paused until explicit resume"
+  ],
+  "requestId": "recovery:56f50bea-376c-488c-ba88-0522444c55c8"
+}

@@ -1,0 +1,57 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "action": "admin/overview",
+      "status": 200
+    },
+    {
+      "action": "admin/members/list",
+      "status": 200
+    },
+    {
+      "action": "admin/invites/list",
+      "status": 200
+    },
+    {
+      "action": "admin/club/settings",
+      "status": 200
+    },
+    {
+      "action": "admin/management/team",
+      "status": 200
+    },
+    {
+      "action": "admin/handovers/list",
+      "status": 200
+    },
+    {
+      "action": "admin/audit/list",
+      "status": 200
+    },
+    {
+      "action": "cross-club roster denied",
+      "status": 403
+    },
+    {
+      "action": "reviewer roster denied",
+      "status": 403
+    },
+    {
+      "action": "developer content denied",
+      "status": 403
+    },
+    {
+      "action": "platform metadata",
+      "status": 200
+    },
+    {
+      "action": "platform recovery list",
+      "status": 200
+    },
+    {
+      "action": "QR approve exchange CSRF Origin replay logout",
+      "status": "pass"
+    }
+  ]
+}

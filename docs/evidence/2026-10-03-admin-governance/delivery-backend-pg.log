@@ -1,0 +1,22 @@
+✔ admin governance exposes scoped service-role PostgreSQL contracts (35.081375ms)
+✔ description edits invalidate stale settings and platform snapshots in both directions (33.559833ms)
+✔ legacy invite keys become opaque and legacy applications retain only invite ids (12.729417ms)
+✔ invitation reservations, authorization, cancellation and restored-member downgrade are transactional (41.644833ms)
+✔ recovery without an explicit team promotes only its target and demotes the previous management team (23.888542ms)
+✔ overview counts proposed handovers and decline uses the declined status (19.679834ms)
+✔ overview reports the current active manager count after role changes (14.377167ms)
+✔ my handover inbox paginates pending requests across clubs (16.767334ms)
+✔ my recovery inbox paginates open requests across clubs (15.754916ms)
+✔ concurrent application submissions cannot overbook an invite reservation (19.916875ms)
+✔ authentication table grants and RLS policies match the NAS application role (20.349542ms)
+✔ 20 concurrent pairing requests from one source admit exactly eight and persist the atomic limit (26.693458ms)
+✔ QR approval and exchange are single-use; membership downgrade invalidates the old Web session (80.181667ms)
+✔ pending membership API returns cancellation data and its version cancels the real reservation (61.869667ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 353.277625

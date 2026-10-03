@@ -74,9 +74,9 @@ test('Bearer parsing accepts only the opaque 32-byte token shape', () => {
 
 test('NAS migration inventory matches the current CloudBase source schema', async () => {
   const schema = await readMigrationSet();
-  assert.equal(schema.migrations.length, 24);
-  assert.equal(schema.latestVersion, '20261003090000');
-  assert.equal(schema.tables.length, 27);
+  assert.equal(schema.migrations.length, 26);
+  assert.equal(schema.latestVersion, '20261003110000');
+  assert.equal(schema.tables.length, 33);
   assert.equal(schema.tables.some((table) => table.name === 'hg_sessions'), false);
   assert.deepEqual(schema.tables.find((table) => table.name === 'hg_user_xp_accounts').primaryKey, ['user_id', 'club_id']);
 });

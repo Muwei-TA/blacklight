@@ -4,9 +4,9 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const EXPECTED_MIGRATION_COUNT = 24;
-export const EXPECTED_BUSINESS_TABLE_COUNT = 27;
-export const EXPECTED_LATEST_MIGRATION = '20261003090000_platform_developer.sql';
+export const EXPECTED_MIGRATION_COUNT = 26;
+export const EXPECTED_BUSINESS_TABLE_COUNT = 33;
+export const EXPECTED_LATEST_MIGRATION = '20261003110000_admin_web_auth.sql';
 const MIGRATION_NAME = /^\d{14}_[a-z0-9_]+\.sql$/;
 
 export function sha256(value) {

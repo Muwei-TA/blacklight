@@ -1,0 +1,4 @@
+
+> tdesign-miniprogram-starter@0.0.2 lint
+> npx eslint ./ --no-eslintrc -c ./.eslintrc.js
+

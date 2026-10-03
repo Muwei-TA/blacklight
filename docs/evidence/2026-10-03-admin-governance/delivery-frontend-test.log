@@ -1,0 +1,142 @@
+
+> tdesign-miniprogram-starter@0.0.2 test
+> node --test tests/*.test.mjs
+
+OK: role visibility, stale club responses, one-time invite lifecycle, browser CSRF, loopback guard, Mini confirmation flow, expired logout reset, platform list selection, and render-error recovery passed
+✔ tests/admin-governance-ui.test.mjs (105.980583ms)
+OK: account inbox loads every page, finds later-page focus items, closes accepted recovery actions, and drops stale account results
+✔ tests/admin-management-inbox.test.mjs (120.237459ms)
+OK: admin notification targets are allowlisted, queue deep links select safely, and foreground refresh preserves cold-start behavior
+✔ tests/admin-notification-navigation.test.mjs (112.718875ms)
+OK: admin usage status is role-gated, shows UTC limits, retains snapshots on errors, and labels disabled quotas
+✔ tests/admin-usage-status.test.mjs (93.587209ms)
+OK: Web-login confirmation context is cleared and in-flight scans are discarded after account switching
+✔ tests/admin-web-login-identity.test.mjs (82.586584ms)
+OK: board directory visibility, duplicate feedback, detail post actions, and boardId compose flow
+✔ tests/boards-pages.test.mjs (98.194666ms)
+OK: board services use independent endpoints, trim create input, and pass review versions
+✔ tests/boards-service.test.mjs (107.981917ms)
+✔ themed Page tracks club sessions without changing business listeners or lifecycle contracts (3.6635ms)
+✔ F1 published: replace temporary identity and delete using current server version (4.555708ms)
+✔ F1 pending: replace temporary identity and delete using current server version (1.38325ms)
+✔ F1 submitting/uncertain placeholders cannot be deleted locally (8.665833ms)
+✔ F1 timeout retry reuses key and replaces, rather than duplicates, the saved reply (2.225042ms)
+✔ rejected submission removes only its temporary placeholder (2.525958ms)
+✔ optimistic reaction succeeds and a failure rolls back (2.536875ms)
+✔ F6 removing an earlier row cannot redirect a failed reaction rollback (0.778667ms)
+✔ F6 a fresh server snapshot is not overwritten by an older failure (2.613042ms)
+✔ F6 removed targets and deleted parent tombstones are not recreated by rollback (1.996833ms)
+✔ author deletion retains a tombstone until the last reply is removed (0.604875ms)
+✔ non-authors cannot delete; failed deletion keeps the original row (1.825875ms)
+✔ F5 append merges repeated parents and replies without dropping earlier children (0.882583ms)
+✔ a pre-delete comments request cannot resurrect a successfully deleted row (20.374708ms)
+OK: draft idempotency stability and release capability gates passed
+✔ tests/content-integration.test.mjs (92.429209ms)
+OK: article feed, pagination, image reauthorization, article publishing, collection gate, profile privacy, and T-02 contracts passed
+✔ tests/discovery-pages.test.mjs (75.243833ms)
+OK: governance DTO allow-lists, endpoint services, reason guards, and page contracts passed
+✔ tests/governance.test.mjs (85.149208ms)
+OK: history-only posts keep text readable and never expose attachment URLs to the view
+✔ history-only details omit media URLs while retaining readable text responses (5.2265ms)
+OK: home clears A state and loads B feed and recommendations on session change
+✔ tests/home-club-switch.test.mjs (83.176916ms)
+OK: feed post actions are owner-gated, direction-limited, confirmed, versioned, and reflected in the list
+✔ tests/home-post-actions.test.mjs (131.972792ms)
+OK: post image preview renews signed URLs and fails closed without cached fallback
+✔ tests/image-preview.test.mjs (80.611417ms)
+OK: topic, message, and search errors retain old results and expose retry until success
+✔ tests/list-stale-error.test.mjs (79.359417ms)
+[api] ok {
+  action: 'posts/comments/list',
+  requestId: 'local-1',
+  role: 'member',
+  ms: 2
+}
+[api] ok {
+  action: 'posts/comments/list',
+  requestId: 'local-1',
+  role: 'member',
+  ms: 1
+}
+[api] ok {
+  action: 'posts/comments/reaction',
+  requestId: 'local-2',
+  role: 'member',
+  ms: 0
+}
+[api] ok {
+  action: 'posts/comments/list',
+  requestId: 'local-3',
+  role: 'member',
+  ms: 0
+}
+[api] forbidden {
+  action: 'posts/comments/delete',
+  requestId: 'local-4',
+  role: 'member',
+  detail: { reason: 'not comment author' }
+}
+[api] conflict {
+  action: 'posts/comments/delete',
+  requestId: 'local-2',
+  role: 'member',
+  detail: { field: 'expectedVersion' }
+}
+[api] ok {
+  action: 'posts/comments/delete',
+  requestId: 'local-3',
+  role: 'member',
+  ms: 1
+}
+[api] ok {
+  action: 'posts/comments/list',
+  requestId: 'local-5',
+  role: 'member',
+  ms: 0
+}
+✔ actual request.js and posts service reach local API handlers for comment list, reaction, delete and conflict (36.028291ms)
+OK: invite success uses refreshed server membership, uncertain submissions reconcile safely, and removed-member pending remains guarded
+✔ tests/membership-auto-join.test.mjs (90.098833ms)
+OK: moderation queue DTO whitelist, action reasons, expectedVersion, and decision routes passed
+✔ tests/moderation.test.mjs (93.78375ms)
+OK: multi-club action context, club-scoped cache keys, startup selection, and unread race isolation
+✔ tests/multi-club.test.mjs (87.037625ms)
+OK: hidden/rejected appeal entry uses the authenticated list version without reading detail
+✔ tests/my-content-appeal.test.mjs (75.352625ms)
+OK: level progress, L8 progress hiding, experience reversal copy, account scope, and check-in isolation
+✔ tests/my-levels.test.mjs (90.948833ms)
+OK: My uses app session events, avoids Tab refresh requests, and guards explicit refreshes against stale responses
+✔ tests/my-membership-refresh.test.mjs (86.145542ms)
+✔ profile refresh wins over an older in-flight page append (2.645875ms)
+✔ topic refresh wins over an older in-flight page append (1.112875ms)
+✔ silent feed refresh blocks pagination until its first page settles (0.684917ms)
+✔ board selection invalidates old feed pages and resets the cursor (2.816208ms)
+✔ silent My Content refresh blocks pagination until its first page settles (2.373917ms)
+OK: release keeps boardId and topicId independent and clears both for private posts
+✔ tests/release-board-association.test.mjs (102.420417ms)
+OK: release editor rebinds by club, preserves scoped drafts, and ignores stale upload results
+✔ club switches preserve the source draft and rebind a blank editor to each selected club (3.058542ms)
+✔ an upload from the old club cannot overwrite the editor or upload control in the new club (2.062167ms)
+OK: rejected post restores owned detail, saves edit, resubmits version, and clears draft
+✔ tests/resubmit-flow.test.mjs (124.708709ms)
+✔ F4 a new query cannot append with the previous query cursor while its first page loads (2.443083ms)
+✔ F4 changing scope invalidates an in-flight append and resets loadingMore (1.878125ms)
+✔ F4 clearing input cancels debounce and ignores outstanding responses (2.776292ms)
+OK: actual request VM preserves business errors, invalidates only auth failures, and runs app.invalidateSession
+✔ tests/session-invalidation.test.mjs (114.691417ms)
+✔ tests/tab-club-theme.test.mjs (93.002875ms)
+OK: themed Page and page-meta cover 30 app routes
+✔ tests/theme-page-coverage.test.mjs (96.093917ms)
+✔ tests/topic-membership-sync.test.mjs (72.755708ms)
+OK: CloudBase/NAS transport, server-side login boundary, error mapping, and idempotency checks passed
+✔ tests/transport.test.mjs (68.516375ms)
+OK: image prepare, controlled upload DTO, stable keys, polling bound, and retry reuse passed
+✔ tests/uploads.test.mjs (66.182125ms)
+ℹ tests 54
+ℹ suites 0
+ℹ pass 54
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 450.122125

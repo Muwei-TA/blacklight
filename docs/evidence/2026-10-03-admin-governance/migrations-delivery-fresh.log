@@ -1,0 +1,32 @@
+psql:/Users/muwei/WeChatProjects/.codex-worktrees/blacklight-admin-governance-20261003/deploy/nas/compat/000_cloudbase_roles.sql:23: NOTICE:  role "blacklight_app" has already been granted membership in role "service_role" by role "review_admin"
+applied 20260922160000_postgresql_core.sql
+applied 20260922160500_runtime_diagnostic.sql
+applied 20260922170000_governance.sql
+applied 20260922180000_image_intents.sql
+applied 20260922183000_atomic_images.sql
+applied 20260922190000_invite_creation.sql
+applied 20260922195000_atomic_comments_and_deletion.sql
+applied 20260922200000_atomic_moderation.sql
+applied 20260922205000_comment_queue.sql
+applied 20260922210000_membership_apply.sql
+applied 20260922220000_finish_review.sql
+applied 20260922230000_asset_cleanup_boundary.sql
+applied 20260923000000_usage_quotas.sql
+applied 20260923120000_resubmit_rejected_post.sql
+applied 20260924080000_invite_auto_join.sql
+applied 20260924090000_admin_todo_notifications.sql
+applied 20260925100000_comment_reactions.sql
+applied 20260925120000_hot_path_indexes.sql
+applied 20260925130000_atomic_reaction_toggle.sql
+applied 20260927123000_boards_domain.sql
+applied 20260927150000_unified_manual_review.sql
+applied 20260927160000_user_levels.sql
+applied 20261002090000_multi_club_tenancy.sql
+applied 20261003090000_platform_developer.sql
+NOTICE:  policy "hg_management_terms_service_role_all" for relation "public.hg_management_terms" does not exist, skipping
+NOTICE:  policy "hg_management_requests_service_role_all" for relation "public.hg_management_requests" does not exist, skipping
+NOTICE:  policy "hg_invitation_rate_limits_service_role_all" for relation "public.hg_invitation_rate_limits" does not exist, skipping
+NOTICE:  policy "hg_invite_codes_service_role_all" for relation "public.hg_invite_codes" does not exist, skipping
+applied 20261003100000_admin_governance.sql
+applied 20261003110000_admin_web_auth.sql
+ready: 26 migrations recorded; hg_sessions present

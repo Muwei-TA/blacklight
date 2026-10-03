@@ -1,0 +1,10 @@
+
+> heiguang-shudong-backend@0.1.0 sync
+> node scripts/sync-shared.mjs
+
+synced shared/ -> cloudfunctions/api/shared/
+synced shared/ -> cloudfunctions/review-callback/shared/
+synced shared/ -> cloudfunctions/worker/shared/
+
+完成：3 个云函数，共复制 48 个文件
+提醒：cloudfunctions/*/shared/ 已在 .gitignore 中忽略，请勿手动编辑副本。
