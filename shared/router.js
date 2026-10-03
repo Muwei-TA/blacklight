@@ -13,6 +13,21 @@ const { scrubForLog } = require('./anonymity');
 const { resolveContext, resolveDirectoryContext } = require('./session');
 const { DEFAULT_CLUB_ID } = require('./constants');
 
+const DIRECTORY_ACTIONS = new Set([
+  'account/me',
+  'clubs/mine',
+  'clubs/list',
+  'me/account/delete',
+  'account/web-login/info',
+  'account/web-login/approve',
+  'account/web-login/reject',
+  'account/handovers/list',
+  'account/recovery/list',
+  'account/recovery/info',
+  'account/recovery/accept',
+  'account/recovery/decline',
+]);
+
 /**
  * @param {object} handlers { 'module/action': async (payload, ctx) => data }
  * @param {object} options { requireAuthByDefault }
@@ -63,9 +78,10 @@ function createRouter(handlers, { name = 'api', identityResolver = null } = {}) 
       if (identity.invalid) {
         return { code: KIND.UNAUTHENTICATED, message: MESSAGE_BY_KIND[KIND.UNAUTHENTICATED], requestId };
       }
-      ctx = (action.startsWith('platform/') || ['account/me', 'clubs/mine', 'clubs/list', 'me/account/delete'].includes(action))
+      ctx = (action.startsWith('platform/') || DIRECTORY_ACTIONS.has(action))
         ? await resolveDirectoryContext(identity.openid || null)
         : await resolveContext(identity.openid || null, event.clubId === undefined ? DEFAULT_CLUB_ID : event.clubId);
+      ctx.requestedClubId = event.clubId === undefined ? null : event.clubId;
       ctx.identityDiagnostic = identity.diagnostic || { source: 'nas-session', hasOpenid: !!identity.openid };
       ctx.requestId = requestId;
       ctx.action = action;

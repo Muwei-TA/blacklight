@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 
 const require = createRequire(import.meta.url);
 const Module = require('node:module');
@@ -21,9 +22,8 @@ const fakeDb = {
     return {
       async rpc(name, args) {
         calls.push({ name, args });
-        if (name === 'hg_governance_admin' && args.p_action === 'members.list') {
+        if (name === 'hg_admin_management' && args.p_action === 'members.list') {
           return {
-            ok: true,
             items: [{
               targetUserId: 'u_target',
               displayName: '目标成员',
@@ -33,15 +33,20 @@ const fakeDb = {
               version: 2,
               wxOpenIdRef: 'must-not-cross-dto',
             }],
+            nextCursor: null,
           };
         }
-        if (name === 'hg_create_invite') {
+        if (name === 'hg_admin_management' && args.p_action === 'invites.create') {
           return {
-            ok: true,
-            code: 'AB12CD34EF56',
+            inviteId: 'opaque-invite-1',
+            mode: args.p_input.mode,
+            status: 'active',
             expiresAt: '2026-09-30T00:00:00.000Z',
             maxUses: args.p_input.maxUses,
             usedCount: 0,
+            reservedCount: 0,
+            version: 1,
+            codeHash: 'never-return-this-hash',
           };
         }
         if (args.p_action === 'appeals.mine' || args.p_action === 'admin.appeals.list') {
@@ -197,7 +202,7 @@ test('申诉列表拒绝未授权的访客和普通成员', async () => {
 test('成员名册只返回必要 DTO，moderator 才能读取', async () => {
   calls.length = 0;
   const result = await governance.listMembers({ limit: 20 }, ctx(moderator));
-  assert.equal(calls[0].name, 'hg_governance_admin');
+  assert.equal(calls[0].name, 'hg_admin_management');
   assert.equal(calls[0].args.p_action, 'members.list');
   assert.deepEqual(result.items[0], {
     targetUserId: 'u_target',
@@ -217,22 +222,26 @@ test('成员名册只返回必要 DTO，moderator 才能读取', async () => {
 
 test('邀请码由服务端生成并限制 maxUses/TTL，admin 不能创建', async () => {
   calls.length = 0;
-  const result = await governance.createInvite({ maxUses: 3, ttlSeconds: 3600 }, ctx(moderator));
-  assert.equal(calls[0].name, 'hg_create_invite');
+  const reason = '本学期社团招新活动请使用此邀请码';
+  const result = await governance.createInvite({ mode: 'application', maxUses: 3, ttlSeconds: 3600, reason }, ctx(moderator));
+  assert.equal(calls[0].name, 'hg_admin_management');
+  assert.equal(calls[0].args.p_action, 'invites.create');
   assert.equal(calls[0].args.p_actor_id, 'u_mod');
-  assert.deepEqual(calls[0].args.p_input, { maxUses: 3, ttlSeconds: 3600 });
-  assert.equal(result.code, 'AB12CD34EF56');
+  assert.equal(calls[0].args.p_input.code, undefined);
+  assert.equal(createHash('sha256').update(result.code, 'utf8').digest('hex'), calls[0].args.p_input.codeHash);
+  assert.match(result.code, /^[A-F0-9]{32}$/);
+  assert.equal(result.codeHash, undefined);
 
   await assert.rejects(
-    governance.createInvite({ maxUses: 0, ttlSeconds: 3600 }, ctx(moderator)),
+    governance.createInvite({ mode: 'application', maxUses: 0, ttlSeconds: 3600, reason }, ctx(moderator)),
     (error) => error.kind === 'invalid_input',
   );
   await assert.rejects(
-    governance.createInvite({ maxUses: 1, ttlSeconds: 30 }, ctx(moderator)),
+    governance.createInvite({ mode: 'application', maxUses: 1, ttlSeconds: 30, reason }, ctx(moderator)),
     (error) => error.kind === 'invalid_input',
   );
   await assert.rejects(
-    governance.createInvite({ maxUses: 1, ttlSeconds: 3600 }, ctx(admin)),
+    governance.createInvite({ mode: 'application', maxUses: 1, ttlSeconds: 3600, reason }, ctx(admin)),
     (error) => error.kind === 'forbidden',
   );
 });

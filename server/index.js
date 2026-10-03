@@ -2,7 +2,17 @@
 
 const http = require('node:http');
 const crypto = require('node:crypto');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const { validateConfig } = require('./config');
+const {
+  ADMIN_WEB_ACTIONS,
+  AdminWebAuthError,
+  createAdminWebAuth,
+  normalizeOrigin,
+  validCsrfToken,
+  buildSessionCookie,
+} = require('./admin-web-auth');
 
 const MAX_JSON_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_AUTH_BODY_BYTES = 16 * 1024;
@@ -60,7 +70,7 @@ function setCorsHeaders(res) {
   res.setHeader('access-control-max-age', '600');
 }
 
-function createServer() {
+function createServer({ adminWebAuth = createAdminWebAuth(), webActionHandler = null } = {}) {
   // Local HTTP API uses the same action handlers and envelope as the former
   // cloud function. The second router argument is server-created and never
   // comes from the JSON body.
@@ -70,13 +80,26 @@ function createServer() {
   const media = require('./media');
   const { HTTP_BY_KIND } = require('../shared/errors');
   const actionHandler = api.createHandler({ identityResolver: auth.resolveBearerIdentity });
+  const adminActionHandler = webActionHandler || api.createHandler({
+    identityResolver: async (context = {}) => context.adminWebIdentity || { openid: null, invalid: false },
+  });
 
   async function handle(req, res) {
-    setCorsHeaders(res);
     const requestId = getRequestId();
     const requestUrl = new URL(req.url || '/', 'http://localhost');
     const pathname = requestUrl.pathname;
     res.setHeader('x-request-id', requestId);
+
+    if (!pathname.startsWith('/v1/admin/') && pathname !== '/admin' && !pathname.startsWith('/admin/')) {
+      setCorsHeaders(res);
+    } else {
+      res.setHeader('cache-control', 'no-store');
+      res.setHeader('x-content-type-options', 'nosniff');
+      res.setHeader('referrer-policy', 'no-referrer');
+      res.setHeader('cross-origin-resource-policy', 'same-origin');
+      res.setHeader('x-frame-options', 'DENY');
+      res.setHeader('content-security-policy', "frame-ancestors 'none'");
+    }
 
     if (req.method === 'OPTIONS') {
       res.statusCode = 204;
@@ -148,6 +171,140 @@ function createServer() {
       return;
     }
 
+    if (req.method === 'POST' && pathname === '/v1/admin/auth/pairings') {
+      try {
+        await readJson(req, MAX_AUTH_BODY_BYTES);
+        const pairing = await adminWebAuth.createPairing({
+          origin: req.headers.origin,
+          remoteAddress: req.socket.remoteAddress || '',
+        });
+        sendJson(res, 200, pairing);
+      } catch (error) {
+        sendAdminError(res, error, requestId, 'pairing_create');
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/v1/admin/auth/pairings/status') {
+      try {
+        const body = await readJson(req, MAX_AUTH_BODY_BYTES);
+        const status = await adminWebAuth.getPairingStatus({
+          id: body.id,
+          pollKey: body.pollKey,
+          origin: req.headers.origin,
+        });
+        sendJson(res, 200, status);
+      } catch (error) {
+        sendAdminError(res, error, requestId, 'pairing_status');
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/v1/admin/auth/exchange') {
+      try {
+        const body = await readJson(req, MAX_AUTH_BODY_BYTES);
+        const session = await adminWebAuth.redeemPairing({
+          id: body.id,
+          pollKey: body.pollKey,
+          exchangeCode: body.exchangeCode,
+          origin: req.headers.origin,
+        });
+        res.setHeader('set-cookie', buildSessionCookie(session.sessionToken));
+        sendJson(res, 200, { csrfToken: session.csrfToken });
+      } catch (error) {
+        sendAdminError(res, error, requestId, 'pairing_exchange');
+      }
+      return;
+    }
+
+    if (req.method === 'GET' && pathname === '/v1/admin/session') {
+      try {
+        const session = await adminWebAuth.resolveSession(req);
+        if (!session) throw new HttpError(401, 'unauthenticated', '请重新扫码登录');
+        const suppliedOrigin = req.headers.origin;
+        if (suppliedOrigin && normalizeOrigin(suppliedOrigin) !== session.origin) {
+          throw new HttpError(403, 'invalid_origin', '管理台来源不匹配');
+        }
+        const context = { requestId, adminWebIdentity: session.identity };
+        const [accountResult, clubsResult] = await Promise.all([
+          adminActionHandler({ action: 'account/me', payload: {} }, context),
+          adminActionHandler({ action: 'clubs/mine', payload: {} }, context),
+        ]);
+        if (!accountResult || accountResult.code !== 0 || !clubsResult || clubsResult.code !== 0) {
+          const result = accountResult && accountResult.code !== 0 ? accountResult : clubsResult;
+          const status = result && result.code === 'unauthenticated' ? 401 : 503;
+          throw new HttpError(status, result && result.code || 'session_unavailable', '管理会话暂不可用，请重新登录');
+        }
+        const account = accountResult.data || {};
+        const clubs = clubsResult.data && Array.isArray(clubsResult.data.list) ? clubsResult.data.list : [];
+        sendJson(res, 200, {
+          user: account.user ? { id: account.user.id, displayName: account.user.displayName || '' } : null,
+          platformRole: account.platformRole === 'developer' ? 'developer' : 'none',
+          clubs: clubs.filter((club) => club.status === 'active' && club.memberStatus === 'active'
+            && ['admin', 'moderator'].includes(club.role))
+            .map((club) => ({ id: club.id, name: club.name || '', role: club.role })),
+          csrfToken: session.csrfToken,
+        });
+      } catch (error) {
+        sendAdminError(res, error, requestId, 'session_read');
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/v1/admin/action') {
+      try {
+        const body = await readJson(req, MAX_JSON_BODY_BYTES);
+        if (typeof body.action !== 'string' || !ADMIN_WEB_ACTIONS.has(body.action)) {
+          throw new HttpError(400, 'invalid_input', '请求动作不受管理台支持');
+        }
+        if (body.clubId !== undefined && (typeof body.clubId !== 'string' || body.clubId.length > 64)) {
+          throw new HttpError(400, 'invalid_input', '请求内容不合法');
+        }
+        if (body.payload !== undefined && (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload))) {
+          throw new HttpError(400, 'invalid_input', '请求内容不合法');
+        }
+        const session = await adminWebAuth.resolveSession(req);
+        if (!session) throw new HttpError(401, 'unauthenticated', '请重新扫码登录');
+        if (normalizeOrigin(req.headers.origin) !== session.origin) {
+          throw new HttpError(403, 'invalid_origin', '管理台来源不匹配');
+        }
+        if (!validCsrfToken(session.sessionToken, req.headers['x-csrf-token'])) {
+          throw new HttpError(403, 'csrf_failed', '页面状态已过期，请刷新后重试');
+        }
+        const result = await adminActionHandler({
+          action: body.action,
+          clubId: body.clubId,
+          payload: body.payload || {},
+        }, { requestId, adminWebIdentity: session.identity });
+        const status = result.code === 0 ? 200 : (HTTP_BY_KIND[result.code] || 500);
+        sendJson(res, status, result);
+      } catch (error) {
+        sendAdminError(res, error, requestId, 'admin_action');
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/v1/admin/auth/logout') {
+      try {
+        const body = await readJson(req, MAX_AUTH_BODY_BYTES);
+        if (Object.keys(body).length > 0) throw new HttpError(400, 'invalid_input', '请求内容不合法');
+        const session = await adminWebAuth.resolveSession(req);
+        if (!session) throw new HttpError(401, 'unauthenticated', '请重新扫码登录');
+        if (normalizeOrigin(req.headers.origin) !== session.origin) {
+          throw new HttpError(403, 'invalid_origin', '管理台来源不匹配');
+        }
+        if (!validCsrfToken(session.sessionToken, req.headers['x-csrf-token'])) {
+          throw new HttpError(403, 'csrf_failed', '页面状态已过期，请刷新后重试');
+        }
+        await adminWebAuth.revokeSession(session);
+        res.setHeader('set-cookie', buildSessionCookie('', { clear: true }));
+        sendJson(res, 200, { loggedOut: true });
+      } catch (error) {
+        sendAdminError(res, error, requestId, 'session_logout');
+      }
+      return;
+    }
+
     if (pathname === '/v1/review/callback') {
       // CloudBase supplied invocation provenance for the callback function.
       // NAS has no verified WeChat signature or trusted ingress yet, so this
@@ -208,6 +365,50 @@ function createServer() {
       return;
     }
 
+    if ((req.method === 'GET' || req.method === 'HEAD') && (pathname === '/admin' || pathname.startsWith('/admin/'))) {
+      try {
+        if (pathname === '/admin') {
+          res.statusCode = 308;
+          res.setHeader('location', '/admin/');
+          res.end();
+          return;
+        }
+        const encodedRelativePath = pathname.slice('/admin/'.length) || 'index.html';
+        let relativePath;
+        try { relativePath = decodeURIComponent(encodedRelativePath); }
+        catch (_) { throw new HttpError(400, 'invalid_input', '请求路径不合法'); }
+        if (!relativePath || relativePath.split('/').some((part) => !part || part.startsWith('.'))) {
+          throw new HttpError(404, 'not_accessible', '页面不存在');
+        }
+        const root = path.resolve(__dirname, '../admin-web');
+        const filePath = path.resolve(root, relativePath);
+        if (!filePath.startsWith(`${root}${path.sep}`)) throw new HttpError(404, 'not_accessible', '页面不存在');
+        const content = await fs.readFile(filePath);
+        const contentTypes = {
+          '.css': 'text/css; charset=utf-8',
+          '.html': 'text/html; charset=utf-8',
+          '.js': 'text/javascript; charset=utf-8',
+          '.json': 'application/json; charset=utf-8',
+          '.svg': 'image/svg+xml',
+          '.png': 'image/png',
+          '.ico': 'image/x-icon',
+        };
+        res.statusCode = 200;
+        res.setHeader('content-type', contentTypes[path.extname(filePath)] || 'application/octet-stream');
+        res.setHeader('content-length', content.length);
+        if (req.method === 'HEAD') res.end();
+        else res.end(content);
+      } catch (error) {
+        if (error instanceof HttpError) sendJson(res, error.status, { code: error.code, message: error.message, requestId });
+        else if (error && error.code === 'ENOENT') sendJson(res, 404, { code: 'not_accessible', message: '页面不存在', requestId });
+        else {
+          console.error('[http] admin static file failed', { requestId, code: error.code || 'static_error' });
+          sendJson(res, 503, { code: 'server', message: '页面暂时不可用', requestId });
+        }
+      }
+      return;
+    }
+
     sendJson(res, 404, { code: 'not_accessible', message: '这条内容当前不可访问', requestId });
   }
 
@@ -223,6 +424,17 @@ function createServer() {
   server.headersTimeout = 10000;
   server.keepAliveTimeout = 5000;
   return server;
+}
+
+function sendAdminError(res, error, requestId, operation) {
+  if (error instanceof HttpError) {
+    sendJson(res, error.status, { code: error.code, message: error.message, requestId });
+  } else if (error instanceof AdminWebAuthError) {
+    sendJson(res, error.status, { code: error.code, message: error.message, requestId });
+  } else {
+    console.error(`[http] admin ${operation} failed`, { requestId, code: error.code || 'admin_error' });
+    sendJson(res, 503, { code: 'server', message: '管理台服务暂时不可用，请稍后重试', requestId });
+  }
 }
 
 async function start() {

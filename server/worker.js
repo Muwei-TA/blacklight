@@ -3,6 +3,19 @@
 const { validateConfig } = require('./config');
 
 const DEFAULT_INTERVAL_MS = 60 * 1000;
+const TERM_REMINDER_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function createTermReminderRunner(pgStore, { now = Date.now, intervalMs = TERM_REMINDER_INTERVAL_MS } = {}) {
+  if (!pgStore || typeof pgStore.rpc !== 'function') throw new TypeError('PostgreSQL RPC client is required');
+  let lastRunAt = 0;
+  return async function runTermRemindersIfDue() {
+    const current = now();
+    if (current - lastRunAt < intervalMs) return { skipped: true };
+    const result = await pgStore.rpc('hg_management_term_reminders', {});
+    lastRunAt = current;
+    return result || {};
+  };
+}
 
 function intervalMs() {
   const configured = Number(process.env.WORKER_INTERVAL_MS || DEFAULT_INTERVAL_MS);
@@ -17,6 +30,7 @@ async function start() {
   let stopping = false;
   let timer = null;
   let lastSessionCleanupAt = 0;
+  const runTermRemindersIfDue = createTermReminderRunner(pg);
 
   async function cleanupSessions(now = Date.now()) {
     if (now - lastSessionCleanupAt < 24 * 60 * 60 * 1000) return;
@@ -37,6 +51,17 @@ async function start() {
     active = true;
     try {
       await cleanupSessions();
+      try {
+        const reminders = await runTermRemindersIfDue();
+        if (!reminders.skipped && (Number(reminders.sent30Day) > 0 || Number(reminders.sent7Day) > 0)) {
+          console.log('[worker] management term reminders sent', {
+            sent30Day: Number(reminders.sent30Day) || 0,
+            sent7Day: Number(reminders.sent7Day) || 0,
+          });
+        }
+      } catch (error) {
+        console.error('[worker] management term reminders failed', { code: error.code || 'term_reminder_error' });
+      }
       const result = await worker.main(
         { mode: 'all' },
         { localRuntime: true, requestId: `nas:${Date.now().toString(36)}` },
@@ -73,4 +98,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { start, intervalMs, DEFAULT_INTERVAL_MS };
+module.exports = { start, intervalMs, DEFAULT_INTERVAL_MS, TERM_REMINDER_INTERVAL_MS, createTermReminderRunner };

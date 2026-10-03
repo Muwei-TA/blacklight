@@ -11,6 +11,7 @@ const errors = require('../shared/errors.js');
 const presenters = require('../shared/presenters.js');
 const calls = [];
 let rpcError = null;
+let rpcResult = null;
 
 const fakeDb = {
   getDb() {
@@ -18,7 +19,7 @@ const fakeDb = {
       async rpc(name, args) {
         calls.push({ name, args });
         if (rpcError) throw rpcError;
-        return { state: 'active', applicationId: 'application:1' };
+        return rpcResult || { state: 'active', applicationId: 'application:1' };
       },
     };
   },
@@ -53,7 +54,7 @@ const member = policies.buildViewer({
 });
 const ctx = (viewer) => ({ viewer });
 
-test('入社申请只把 session actor 交给 hg_apply_membership', async () => {
+test('入社申请先散列一次性邀请码，只把哈希和 session actor 交给新 RPC', async () => {
   calls.length = 0;
   rpcError = null;
   const result = await session.apply({
@@ -66,12 +67,14 @@ test('入社申请只把 session actor 交给 hg_apply_membership', async () => 
   }, ctx(applicant));
 
   assert.deepEqual(result, { state: 'active', applicationId: 'application:1' });
-  assert.equal(calls[0].name, 'hg_apply_membership');
+  assert.equal(calls[0].name, 'hg_apply_invitation');
   assert.equal(calls[0].args.p_actor_id, 'u_applicant');
-  assert.deepEqual(calls[0].args.p_input, {
+  assert.equal(calls[0].args.p_input.inviteCode, undefined);
+  assert.deepEqual({ ...calls[0].args.p_input, idempotencyKey: 'ignored' }, {
     displayName: '申请人',
-    inviteCode: 'AB12CD34',
+    codeHash: '668c072603bbc3a89b6e2a67f878e29dbe33c020984d4928eda299e7cebe0adb',
     rulesVersion: 'v1.0',
+    idempotencyKey: 'ignored',
   });
   assert.equal(calls[0].args.p_input.userId, undefined);
 });
@@ -81,6 +84,7 @@ test('已完成邀请码入社的重试由 RPC 幂等返回，不在 API 提前�
   rpcError = null;
   const result = await session.apply({ displayName: '成员', inviteCode: 'AB12CD34', rulesVersion: 'v1.0' }, ctx(member));
   assert.deepEqual(result, { state: 'active', applicationId: 'application:1' });
+  assert.equal(calls[0].name, 'hg_apply_invitation');
   assert.equal(calls[0].args.p_actor_id, 'u_member');
 });
 
@@ -108,4 +112,20 @@ test('邀请码和规则版本错误保持业务错误形态', async () => {
     (error) => error.kind === 'invalid_input' && error.detail.field === 'rulesVersion',
   );
   rpcError = null;
+});
+
+test('RPC返回的业务错误对象不会作为成功申请透传', async () => {
+  rpcError = null;
+  rpcResult = { state: 'rejected', error: 'INVITE_INVALID', applicationId: null };
+  await assert.rejects(
+    session.apply({ displayName: '申请人', inviteCode: 'AB12CD34', rulesVersion: 'v1.0' }, ctx(applicant)),
+    (error) => error.kind === 'invalid_input' && error.detail.field === 'inviteCode',
+  );
+
+  rpcResult = { state: 'rejected', error: 'INVITE_RATE_LIMITED', applicationId: null };
+  await assert.rejects(
+    session.apply({ displayName: '申请人', inviteCode: 'AB12CD34', rulesVersion: 'v1.0' }, ctx(applicant)),
+    (error) => error.kind === 'rate_limited',
+  );
+  rpcResult = null;
 });

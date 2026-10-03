@@ -342,7 +342,8 @@ async function listQueue(payload, ctx, internal = false) {
         id: app._id,
         queue,
         title: app.displayName,
-        summary: `邀请码 ${app.inviteCode} · 已阅读规则 ${app.rulesVersion}`,
+        summary: `已阅读规则 ${app.rulesVersion}`,
+        applicationType: app.applicationType || 'manual_join',
         version: app.version || 1,
         submittedAtText: presenters.formatRelativeTime(app.createdAt, ctx.now),
         statusText: '等待批准',
@@ -463,7 +464,23 @@ async function decideMembership(payload, ctx) {
   const expectedVersion = requiredExpectedVersion(payload);
   const reason =
     decision === 'approve' ? '' : validators.requireString(payload.reason, '拒绝理由', { max: 200 });
-  return callModeration('membership.decide', { id, decision, reason, expectedVersion }, ctx);
+  try {
+    const result = await db.getDb().rpc('hg_decide_membership_application', {
+      p_actor_id: ctx.viewer.userId,
+      p_input: { id, decision, reason, expectedVersion },
+      p_club_id: ctx.viewer.clubId,
+    });
+    if (result && result.error) {
+      const detail = typeof result.error === 'string' ? result.error : JSON.stringify(result.error);
+      throw Object.assign(new Error(detail), { code: result.error.code || result.code || 'P0001' });
+    }
+    const fields = ['ok', 'id', 'applicationId', 'status', 'state', 'decision', 'version', 'reservationStatus'];
+    return Object.fromEntries(fields.filter((field) => result && result[field] !== undefined).map((field) => [field, result[field]]));
+  } catch (error) {
+    const mapped = mapModerationError(error);
+    if (mapped !== error) throw mapped;
+    throw error;
+  }
 }
 
 /**

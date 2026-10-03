@@ -15,6 +15,9 @@ async function execute(action, payload, ctx) {
   } catch (error) {
     const marker = String(error.message || '');
     if (/FORBIDDEN/.test(marker)) throw errors.forbidden();
+    if (/HANDOVER_REQUIRED|PRIMARY_HANDOVER_REQUIRED|HANDOVER_PENDING|PRIMARY_REQUIRED/.test(marker)) {
+      throw errors.conflict('负责人调整需要通过换届流程办理；负责人失联时请使用平台恢复流程');
+    }
     if (/VERSION_CONFLICT/.test(marker)) throw errors.invalidInput('社团配置已更新，请刷新后重试');
     if (/INVALID_INPUT|TARGET_USER_INVALID|TARGET_MEMBERSHIP_INACTIVE|CLUB_EXISTS|CLUB_NOT_FOUND/.test(marker)) {
       throw errors.invalidInput('社团信息或负责人账号不符合要求');

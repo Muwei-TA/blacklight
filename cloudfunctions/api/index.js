@@ -24,6 +24,8 @@ const search = require('./domain/search');
 const assets = require('./domain/assets');
 const moderation = require('./domain/moderation');
 const governance = require('./domain/governance');
+const adminManagement = require('./domain/adminManagement');
+const adminWebLogin = require('./domain/adminWebLogin');
 const operations = require('./domain/operations');
 const usage = require('./domain/usage');
 
@@ -111,11 +113,36 @@ const handlers = {
   'admin/anonymous/reveal': moderation.revealAnonymous,
   'admin/security/check': operations.securityCheck,
   'admin/usage/status': usage.getStatus,
-  'admin/members/list': governance.listMembers,
-  'admin/invites/create': governance.createInvite,
+  'admin/overview': adminManagement.overview,
+  'admin/members/list': adminManagement.listMembers,
+  'admin/invites/list': adminManagement.listInvites,
+  'admin/invites/create': adminManagement.createInvite,
+  'admin/invites/revoke': adminManagement.revokeInvite,
   'admin/member/remove': governance.removeMember,
   'admin/member/mute': governance.muteMember,
   'admin/member/role': governance.changeMemberRole,
+  'admin/club/settings': adminManagement.getSettings,
+  'admin/club/update': adminManagement.updateSettings,
+  'admin/management/team': adminManagement.getTeam,
+  'admin/management/primary': adminManagement.setPrimary,
+  'admin/handovers/list': adminManagement.listHandovers,
+  'admin/handovers/create': adminManagement.createHandover,
+  'admin/handovers/accept': adminManagement.acceptHandover,
+  'admin/handovers/cancel': adminManagement.cancelHandover,
+  'admin/handovers/decline': adminManagement.declineHandover,
+  'admin/audit/list': adminManagement.listAudit,
+  'platform/recovery/list': adminManagement.listPlatformRecoveries,
+  'platform/recovery/request': adminManagement.requestRecovery,
+  'platform/recovery/approve': adminManagement.approveRecovery,
+  'account/handovers/list': adminManagement.listMyHandovers,
+  'account/recovery/list': adminManagement.listMyRecoveries,
+  'account/recovery/info': adminManagement.getMyRecovery,
+  'account/recovery/accept': adminManagement.acceptMyRecovery,
+  'account/recovery/decline': adminManagement.declineMyRecovery,
+  'account/web-login/info': adminWebLogin.info,
+  'account/web-login/approve': adminWebLogin.approve,
+  'account/web-login/reject': adminWebLogin.reject,
+  'membership/cancel': adminManagement.cancelApplication,
   'appeals/create': governance.createAppeal,
   'appeals/mine': governance.listMyAppeals,
   'admin/appeals/list': governance.listAppeals,

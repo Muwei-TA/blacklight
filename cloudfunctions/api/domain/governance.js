@@ -12,6 +12,7 @@ const policies = require('../shared/policies');
 const validators = require('../shared/validators');
 const errors = require('../shared/errors');
 const db = require('../shared/db');
+const adminManagement = require('./adminManagement');
 
 const APPEAL_DECISIONS = ['approve', 'reject'];
 const MANAGEABLE_ROLES = [ROLE.MEMBER, ROLE.MODERATOR, ROLE.ADMIN];
@@ -27,8 +28,6 @@ const APPEAL_DTO_FIELDS = [
   'createdAt',
   'updatedAt',
 ];
-const MEMBER_DTO_FIELDS = ['targetUserId', 'displayName', 'role', 'status', 'mutedUntil', 'version'];
-const DEFAULT_INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 function requiredReason(payload, field = 'reason') {
   return validators.requireString(payload[field], '处理理由', { max: 500 });
@@ -50,7 +49,7 @@ function requireMemberManager(ctx, targetUserId) {
 
 function mapGovernanceError(error) {
   const marker = `${error && error.code ? error.code : ''} ${error && error.message ? error.message : ''}`;
-  if (/VERSION_CONFLICT|APPEAL_EXISTS|IDEMPOTENCY_CONFLICT|CONFLICT/.test(marker)) {
+  if (/VERSION_CONFLICT|APPEAL_EXISTS|IDEMPOTENCY_CONFLICT|CONFLICT|PRIMARY_REQUIRED|HANDOVER_REQUIRED|PRIMARY_HANDOVER_REQUIRED|HANDOVER_PENDING/.test(marker)) {
     return errors.conflict('目标已被更新，请刷新后重试', { field: 'expectedVersion' });
   }
   if (/NOT_FOUND|NOT_OWNER|POST_NOT_APPEALABLE|APPEAL_NOT_FOUND/.test(marker)) {
@@ -73,43 +72,6 @@ async function callGovernance(action, input, ctx) {
     }
     return await store.rpc('hg_governance', {
       p_action: action,
-      p_actor_id: ctx.viewer.userId,
-      p_input: input,
-      p_club_id: ctx.viewer.clubId,
-    });
-  } catch (error) {
-    const mapped = mapGovernanceError(error);
-    if (mapped !== error) throw mapped;
-    throw error;
-  }
-}
-
-async function callAdminGovernance(action, input, ctx) {
-  try {
-    const store = db.getDb();
-    if (!store || typeof store.rpc !== 'function') {
-      throw new Error('governance admin RPC is not configured');
-    }
-    return await store.rpc('hg_governance_admin', {
-      p_action: action,
-      p_actor_id: ctx.viewer.userId,
-      p_input: input,
-      p_club_id: ctx.viewer.clubId,
-    });
-  } catch (error) {
-    const mapped = mapGovernanceError(error);
-    if (mapped !== error) throw mapped;
-    throw error;
-  }
-}
-
-async function callInviteCreate(input, ctx) {
-  try {
-    const store = db.getDb();
-    if (!store || typeof store.rpc !== 'function') {
-      throw new Error('invite RPC is not configured');
-    }
-    return await store.rpc('hg_create_invite', {
       p_actor_id: ctx.viewer.userId,
       p_input: input,
       p_club_id: ctx.viewer.clubId,
@@ -223,43 +185,14 @@ async function listAppeals(payload = {}, ctx) {
   return presentAppealList(await callGovernance('admin.appeals.list', { limit }, ctx));
 }
 
-function presentMember(item = {}) {
-  return Object.fromEntries(MEMBER_DTO_FIELDS.map((field) => [field, item[field] === undefined ? null : item[field]]));
-}
-
-function presentMemberList(result) {
-  return {
-    ok: result && result.ok === true,
-    items: result && Array.isArray(result.items) ? result.items.map(presentMember) : [],
-  };
-}
-
 /** `admin/members/list`: moderator-only roster projection without openid. */
 async function listMembers(payload = {}, ctx) {
-  if (!policies.canManageMembers(ctx.viewer)) throw errors.forbidden({ reason: 'member roster requires moderator' });
-  const limit = validators.clampPageSize(payload.limit);
-  return presentMemberList(await callAdminGovernance('members.list', { limit }, ctx));
-}
-
-function parseBoundedInteger(value, field, { fallback, min, max }) {
-  const number = value === undefined ? fallback : Number(value);
-  if (!Number.isInteger(number) || number < min || number > max) {
-    throw errors.invalidInput(`${field} 不合法`, { field });
-  }
-  return number;
+  return adminManagement.listMembers(payload, ctx);
 }
 
 /** `admin/invites/create`: server generates and returns a one-time invite secret. */
 async function createInvite(payload = {}, ctx) {
-  if (!policies.canManageMembers(ctx.viewer)) throw errors.forbidden({ reason: 'invite creation requires moderator' });
-  const maxUses = parseBoundedInteger(payload.maxUses, 'maxUses', { fallback: 1, min: 1, max: 1000 });
-  const ttlSeconds = parseBoundedInteger(payload.ttlSeconds, 'ttlSeconds', {
-    fallback: DEFAULT_INVITE_TTL_SECONDS,
-    min: 60,
-    max: 90 * 24 * 60 * 60,
-  });
-  // The returned code is intentionally not logged or copied into audit input.
-  return callInviteCreate({ maxUses, ttlSeconds }, ctx);
+  return adminManagement.createInvite(payload, ctx);
 }
 
 module.exports = {
@@ -274,12 +207,8 @@ module.exports = {
   createInvite,
   presentAppeal,
   presentAppealList,
-  presentMember,
-  presentMemberList,
   APPEAL_DECISIONS,
   MANAGEABLE_ROLES,
   APPEAL_DTO_FIELDS,
-  MEMBER_DTO_FIELDS,
-  DEFAULT_INVITE_TTL_SECONDS,
   mapGovernanceError,
 };

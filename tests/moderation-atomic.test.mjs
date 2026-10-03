@@ -71,7 +71,7 @@ const moderator = rootPolicies.buildViewer({
 });
 const ctx = (viewer, capabilities = { anthology: true }) => ({ viewer, capabilities });
 
-test('所有决定把 actor/version/decision 交给单一 hg_moderate RPC', async () => {
+test('内容决定走 hg_moderate，入社决定走保留额度专用 RPC', async () => {
   calls.length = 0;
   await moderation.decideContent({ id: 'p-1', decision: 'approve', expectedVersion: 4, reason: '' }, ctx(moderator));
   await moderation.decideComment({ id: 'c-1', decision: 'reject', expectedVersion: 2, reason: '不符合规范' }, ctx(moderator));
@@ -81,9 +81,13 @@ test('所有决定把 actor/version/decision 交给单一 hg_moderate RPC', asyn
   await moderation.decideCollection({ id: 'task-1', decision: 'include', expectedVersion: 1 }, ctx(moderator));
 
   assert.equal(calls.length, 6);
-  assert.deepEqual(calls.map((call) => call.name), Array(6).fill('hg_moderate'));
+  assert.deepEqual(calls.map((call) => call.name), [
+    'hg_moderate', 'hg_moderate', 'hg_moderate', 'hg_decide_membership_application', 'hg_moderate', 'hg_moderate',
+  ]);
   assert.deepEqual(calls.map((call) => call.args.p_actor_id), Array(6).fill('u_mod'));
   assert.deepEqual(calls.map((call) => call.args.p_input.expectedVersion), [4, 2, 3, 1, 1, 1]);
+  assert.equal(calls[3].args.p_club_id, rootConstants.DEFAULT_CLUB_ID);
+  assert.deepEqual(calls[3].args.p_input, { id: 'a-1', decision: 'approve', reason: '', expectedVersion: 1 });
   assert.equal(calls[0].args.p_input.userId, undefined);
 });
 

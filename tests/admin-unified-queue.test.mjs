@@ -121,6 +121,28 @@ test('内容队列跳过排队中和过期版本，只呈现人工任务的当�
   assert.equal(result.nextCursor, null);
 });
 
+test('成员申请审核卡片不泄露一次性邀请码或其哈希', async () => {
+  reset();
+  fixtures.set(constants.COLLECTIONS.membershipApplications, [{
+    _id: 'application-1',
+    clubId: constants.DEFAULT_CLUB_ID,
+    status: constants.MEMBER_STATUS.PENDING,
+    displayName: '新成员',
+    inviteCode: 'one-time-secret-code',
+    codeHash: 'private-code-hash',
+    rulesVersion: 'v2',
+    version: 1,
+    createdAt: '2026-09-27T08:00:00.000Z',
+  }]);
+
+  const result = await moderation.listQueue({ queue: 'member' }, ctx);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].summary.includes('one-time-secret-code'), false);
+  assert.equal(result.items[0].summary.includes('private-code-hash'), false);
+  assert.equal(result.items[0].inviteCode, undefined);
+  assert.equal(result.items[0].codeHash, undefined);
+});
+
 test('统一队列越过不可见文集任务继续填充后续可见待办', async () => {
   reset();
   fixtures.set(constants.COLLECTIONS.reviewTasks, [

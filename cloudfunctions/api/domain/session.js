@@ -1,5 +1,6 @@
 /** 会话与成员资格用例 */
 
+const crypto = require('node:crypto');
 const { COLLECTIONS, MEMBER_STATUS, NOTIFY_TYPE } = require('../shared/constants');
 const validators = require('../shared/validators');
 const presenters = require('../shared/presenters');
@@ -44,17 +45,29 @@ async function apply(payload, ctx) {
   if (!allowed) throw errors.rateLimited({ action: 'applyMembership' });
 
   const displayName = validators.validateDisplayName(payload.displayName);
-  const inviteCode = validators.requireString(payload.inviteCode, '邀请码', { max: 32 });
+  const inviteCode = validators.requireString(payload.inviteCode, '邀请码', { max: 64 }).toUpperCase();
+  if (!/^[A-F0-9]{8,64}$/.test(inviteCode)) {
+    throw errors.invalidInput('邀请码无效或已过期', { field: 'inviteCode' });
+  }
   const rulesVersion = validators.requireString(payload.rulesVersion, '规则版本', { max: 20 });
+  const idempotencyKey = payload.idempotencyKey === undefined
+    ? crypto.randomUUID()
+    : validators.requireString(payload.idempotencyKey, 'idempotencyKey', { max: 100 });
+  const codeHash = crypto.createHash('sha256').update(inviteCode, 'utf8').digest('hex');
 
   try {
     const store = db.getDb();
     if (!store || typeof store.rpc !== 'function') throw new Error('membership RPC is not configured');
-    return await store.rpc('hg_apply_membership', {
+    const result = await store.rpc('hg_apply_invitation', {
       p_actor_id: ctx.viewer.userId,
-      p_input: { displayName, inviteCode: inviteCode.toUpperCase(), rulesVersion },
+      p_input: { codeHash, displayName, rulesVersion, idempotencyKey },
       p_club_id: clubId,
     });
+    if (result && result.error) {
+      const detail = typeof result.error === 'string' ? result.error : JSON.stringify(result.error);
+      throw Object.assign(new Error(detail), { code: result.error.code || result.code || 'P0001' });
+    }
+    return result;
   } catch (error) {
     const marker = `${error && error.code ? error.code : ''} ${error && error.message ? error.message : ''}`;
     if (/INVITE_INVALID/.test(marker)) {
@@ -64,6 +77,8 @@ async function apply(payload, ctx) {
     if (/RULES_VERSION_INVALID/.test(marker)) {
       throw errors.invalidInput('规则版本已更新，请刷新后重试', { field: 'rulesVersion' });
     }
+    if (/RATE_LIMITED/.test(marker)) throw errors.rateLimited();
+    if (/RESERVATION_EXPIRED/.test(marker)) throw errors.conflict('入社申请已过期，请使用新邀请码重新申请');
     if (/ALREADY_MEMBER/.test(marker)) throw errors.invalidInput('你已经是社内成员');
     if (/FORBIDDEN/.test(marker)) throw errors.forbidden();
     if (/INVALID/.test(marker)) throw errors.invalidInput('请求参数不合法');

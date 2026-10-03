@@ -12,6 +12,7 @@ COPY shared/ ./shared/
 COPY server/ ./server/
 COPY cloudfunctions/api/ ./cloudfunctions/api/
 COPY cloudfunctions/worker/ ./cloudfunctions/worker/
+COPY admin-web/ ./admin-web/
 COPY scripts/sync-shared.mjs ./scripts/sync-shared.mjs
 COPY scripts/local-media-manifest.mjs scripts/local-media-receiver.mjs ./scripts/
 COPY scripts/local-platform-role.mjs ./scripts/
