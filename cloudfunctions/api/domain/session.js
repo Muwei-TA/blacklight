@@ -101,7 +101,17 @@ async function myApplication(payload, ctx) {
 
   if (!res.data || res.data.length === 0) return { state: MEMBER_STATUS.NONE, reason: '' };
   const app = res.data[0];
-  return { state: app.status, reason: app.decisionReason || '', appliedAtText: presenters.formatRelativeTime(app.createdAt, ctx.now) };
+  const rawVersion = Number(app.version);
+  const version = Number.isSafeInteger(rawVersion) && rawVersion > 0 ? rawVersion : 1;
+  const applicationId = typeof app._id === 'string' ? app._id : (typeof app.id === 'string' ? app.id : '');
+  return {
+    applicationId,
+    version,
+    reservationExpiresAt: typeof app.reservationExpiresAt === 'string' ? app.reservationExpiresAt : null,
+    state: app.status,
+    reason: app.decisionReason || '',
+    appliedAtText: presenters.formatRelativeTime(app.createdAt, ctx.now),
+  };
 }
 
 /** PATCH /me/profile —— 昵称与头像。不采集手机号、位置、学号。 */

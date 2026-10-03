@@ -12,8 +12,20 @@ const presenters = require('../shared/presenters.js');
 const calls = [];
 let rpcError = null;
 let rpcResult = null;
+let myApplicationRows = [];
+let myApplicationQuery = null;
 
 const fakeDb = {
+  coll(name, clubId) {
+    const query = { name, clubId };
+    const collection = {
+      where(filter) { query.filter = filter; return collection; },
+      orderBy(field, direction) { query.order = [field, direction]; return collection; },
+      limit(value) { query.limit = value; return collection; },
+      async get() { myApplicationQuery = query; return { data: myApplicationRows }; },
+    };
+    return collection;
+  },
   getDb() {
     return {
       async rpc(name, args) {
@@ -52,7 +64,7 @@ const member = policies.buildViewer({
   role: constants.ROLE.MEMBER,
   memberStatus: constants.MEMBER_STATUS.ACTIVE,
 });
-const ctx = (viewer) => ({ viewer });
+const ctx = (viewer) => ({ viewer, now: Date.now() });
 
 test('入社申请先散列一次性邀请码，只把哈希和 session actor 交给新 RPC', async () => {
   calls.length = 0;
@@ -128,4 +140,49 @@ test('RPC返回的业务错误对象不会作为成功申请透传', async () =>
     (error) => error.kind === 'rate_limited',
   );
   rpcResult = null;
+});
+
+test('pending application returns only cancellation identifiers, version and reservation expiry', async () => {
+  myApplicationRows = [{
+    _id: 'application:pending-1', userId: applicant.userId, clubId: constants.DEFAULT_CLUB_ID,
+    status: 'pending', version: '3', reservationExpiresAt: '2026-10-06T00:00:00.000Z',
+    createdAt: new Date().toISOString(), inviteCode: 'must-not-return', codeHash: 'must-not-return',
+  }];
+  myApplicationQuery = null;
+
+  const result = await session.myApplication({}, ctx(applicant));
+
+  assert.deepEqual({
+    applicationId: result.applicationId,
+    version: result.version,
+    reservationExpiresAt: result.reservationExpiresAt,
+    state: result.state,
+    reason: result.reason,
+  }, {
+    applicationId: 'application:pending-1',
+    version: 3,
+    reservationExpiresAt: '2026-10-06T00:00:00.000Z',
+    state: 'pending',
+    reason: '',
+  });
+  assert.deepEqual(myApplicationQuery, {
+    name: constants.COLLECTIONS.membershipApplications,
+    clubId: constants.DEFAULT_CLUB_ID,
+    filter: { userId: applicant.userId, clubId: constants.DEFAULT_CLUB_ID },
+    order: ['createdAt', 'desc'],
+    limit: 1,
+  });
+  assert.equal(JSON.stringify(result).includes('must-not-return'), false);
+});
+
+test('pending application uses a positive integer version and falls back to version one for legacy values', async () => {
+  myApplicationRows = [{
+    _id: 'application:legacy-1', status: 'pending', version: 0,
+    reservationExpiresAt: null, createdAt: new Date().toISOString(),
+  }];
+  const result = await session.myApplication({}, ctx(applicant));
+  assert.equal(result.applicationId, 'application:legacy-1');
+  assert.equal(result.version, 1);
+  assert.equal(Number.isSafeInteger(result.version) && result.version > 0, true);
+  assert.equal(result.reservationExpiresAt, null);
 });
