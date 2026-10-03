@@ -9,7 +9,7 @@
  */
 
 const { COLLECTIONS, ROLE, MEMBER_STATUS, DEFAULT_CLUB_ID } = require('./constants');
-const { coll, findOneById, serverDate, command } = require('./db');
+const { coll, findOneById, serverDate, getDb } = require('./db');
 const { buildViewer } = require('./policies');
 const errors = require('./errors');
 const validators = require('./validators');
@@ -123,27 +123,31 @@ async function resolveDirectoryContext(openid) {
  */
 async function checkRateLimit(userId, action, { windowMs = 60 * 1000, max = 10 } = {}) {
   if (!userId) return true;
-  const _ = command();
   const now = Date.now();
-  const field = `rate.${action}`;
-
-  const user = await findOneById(COLLECTIONS.users, userId);
-  const bucket = (user && user.rate && user.rate[action]) || null;
-
-  if (bucket && now - bucket.startedAt < windowMs) {
-    if (bucket.count >= max) return false;
-    await coll(COLLECTIONS.users)
-      .doc(userId)
-      .update({ data: { [`${field}.count`]: _.inc(1) } })
-      .catch(() => {});
-    return true;
-  }
-
-  await coll(COLLECTIONS.users)
-    .doc(userId)
-    .update({ data: { [field]: { startedAt: now, count: 1 } } })
-    .catch(() => {});
-  return true;
+  const bucket = "COALESCE(users.doc #> ARRAY['rate', $2::text]::text[], '{}'::jsonb)";
+  const startedAt = `CASE WHEN jsonb_typeof(${bucket}->'startedAt') = 'number' THEN (${bucket}->>'startedAt')::numeric ELSE NULL END`;
+  const count = `CASE WHEN jsonb_typeof(${bucket}->'count') = 'number' THEN (${bucket}->>'count')::numeric ELSE 0 END`;
+  const inWindow = `(${startedAt} IS NOT NULL AND ($3::numeric - ${startedAt}) < $5::numeric)`;
+  const result = await getDb().query(`
+    UPDATE public.hg_users AS users
+       SET doc = COALESCE(users.doc, '{}'::jsonb)
+         || jsonb_build_object(
+              'rate',
+              (CASE WHEN jsonb_typeof(users.doc->'rate') = 'object'
+                    THEN users.doc->'rate' ELSE '{}'::jsonb END)
+                || jsonb_build_object(
+                     $2::text,
+                     CASE WHEN ${inWindow}
+                          THEN jsonb_build_object('startedAt', ${bucket}->'startedAt', 'count', ${count} + 1)
+                          ELSE jsonb_build_object('startedAt', $3::bigint, 'count', 1)
+                      END
+                   )
+            )
+     WHERE users.id = $1
+       AND (NOT ${inWindow} OR ${count} < $4::numeric)
+     RETURNING users.id
+  `, [userId, action, now, max, windowMs]);
+  return result.rowCount > 0;
 }
 
 module.exports = {

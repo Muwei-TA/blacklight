@@ -152,7 +152,7 @@ async function canReadAsset(asset, ctx) {
   if (!asset.postId) return false;
   const post = await db.findOneById(COLLECTIONS.posts, asset.postId, clubId);
   if (!post || post.clubId !== asset.clubId) return false;
-  return policies.canReadPost(ctx.viewer, post);
+  return policies.canReadPostMedia(ctx.viewer, post);
 }
 
 async function authorizedUrl(asset, ctx = null, post = null) {
@@ -202,7 +202,7 @@ async function getStatus(payload, ctx) {
 
 async function signReadableAssets(assets, posts, ctx) {
   const clubId = ctx.viewer.clubId;
-  const allowed = new Map(posts.filter((p) => policies.canReadPost(ctx.viewer, p)).map((p) => [p._id, p]));
+  const allowed = new Map(posts.filter((p) => policies.canReadPostMedia(ctx.viewer, p)).map((p) => [p._id, p]));
   return Promise.all(assets.map(async (asset) => ({
     ...asset, tempFileURL: allowed.has(asset.postId) && (allowed.get(asset.postId).assetIds || []).includes(asset._id)
       && asset.clubId === clubId && allowed.get(asset.postId).clubId === asset.clubId

@@ -78,6 +78,10 @@ const validators = {
 const policies = {
   canUseUploads: (viewer, capabilities) => !!(viewer?.isMember && capabilities?.uploads === true),
   canReadPost: (viewer, post) => !!post && (post.visibility === 'public' || post.ownerId === viewer.userId),
+  canReadPostMedia: (viewer, post) => !!post
+    && viewer?.memberStatus !== 'removed'
+    && (post.visibility === 'public' || viewer?.isMember)
+    && policies.canReadPost(viewer, post),
 };
 
 const domainErrors = {
@@ -306,6 +310,45 @@ test('signReadableAssets re-signs only currently readable post assets and never 
   assert.equal(first[0].tempFileURL, 'https://signed/file-public');
   assert.equal(first[1].tempFileURL, '');
   assert.equal(second[1].tempFileURL, '');
+});
+
+test('removed owner can read historical post text but cannot obtain an attachment URL', async () => {
+  const signed = [];
+  const asset = {
+    _id: 'asset-history', clubId: 'heiguang', ownerId: 'owner', postId: 'post-history',
+    status: 'verified', fileId: 'file-history',
+  };
+  const post = {
+    _id: 'post-history', clubId: 'heiguang', ownerId: 'owner', visibility: 'club',
+    status: 'published', permissionVersion: 1, assetIds: ['asset-history'],
+  };
+  const viewer = { userId: 'owner', clubId: 'heiguang', isMember: false, memberStatus: 'removed' };
+  const db = {
+    getStorage: () => ({ createAssetUrl(options) { signed.push(options); return 'http://local/signed'; } }),
+    async findOneById(name) { return name === 'hg_assets' ? asset : post; },
+  };
+  const assets = loadVm('cloudfunctions/api/domain/assets.js', {
+    '../shared/constants': constants,
+    '../shared/policies': policies,
+    '../shared/validators': validators,
+    '../shared/errors': domainErrors,
+    '../shared/db': db,
+    '../shared/image-processing': {
+      ImageProcessingError, MAX_DECODED_BYTES: 2 * 1024 * 1024,
+      JPEG_MIME: 'image/jpeg', PNG_MIME: 'image/png', sanitizeImageBase64() {},
+    },
+  });
+
+  assert.equal(policies.canReadPost(viewer, post), true, 'the text history remains readable');
+  const signedAssets = await assets.signReadableAssets([asset], [post], { viewer });
+  assert.equal(signedAssets.length, 1);
+  assert.equal(signedAssets[0].tempFileURL, '');
+  assert.equal(signedAssets[0].coverURL, '');
+  await assert.rejects(
+    assets.getStatus({ assetId: asset._id }, { viewer }),
+    (error) => error.kind === 'not_accessible',
+  );
+  assert.deepEqual(signed, [], 'neither detail hydration nor assets/status may mint a URL');
 });
 
 test('media verification update is guarded by the observed status and fileId', async () => {

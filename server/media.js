@@ -45,7 +45,7 @@ async function getAuthorizedMedia({ assetId, token, signature }) {
   if (asset.postId) {
     post = await db.findOneById(COLLECTIONS.posts, asset.postId, asset.clubId);
     if (!post || post.clubId !== asset.clubId) return null;
-    if (!policies.canReadPost(ctx.viewer, post)) return null;
+    if (!policies.canReadPostMedia(ctx.viewer, post)) return null;
     if (post._id !== asset.postId || !(post.assetIds || []).includes(asset._id)) return null;
   } else if (!claim.userId || asset.ownerId !== claim.userId || ctx.viewer.userId !== claim.userId || !ctx.viewer.isMember) {
     return null;

@@ -106,6 +106,21 @@ test('被移除的成员仍可访问自己的历史内容', () => {
   assert.equal(policies.canReadPost(removed, own), true);
 });
 
+test('被移除成员的历史正文仍可读，但任何附件都不能继续读取', () => {
+  const ownClubPost = makePost({ ownerId: 'u_removed', assetIds: ['asset-1'] });
+  const ownPublicPost = makePost({ ownerId: 'u_removed', visibility: VISIBILITY.PUBLIC, assetIds: ['asset-2'] });
+  const publicPost = makePost({ ownerId: 'u_other', visibility: VISIBILITY.PUBLIC, assetIds: ['asset-3'] });
+
+  assert.equal(policies.canReadPost(removed, ownClubPost), true);
+  assert.equal(policies.canReadPostMedia(removed, ownClubPost), false);
+  assert.equal(policies.canReadPost(removed, ownPublicPost), true);
+  assert.equal(policies.canReadPostMedia(removed, ownPublicPost), false);
+  assert.equal(policies.canReadPostMedia(removed, publicPost), false);
+  assert.equal(policies.canReadPostMedia(member, makePost({ assetIds: ['asset-4'] })), true);
+  assert.equal(policies.canReadPostMedia(guest, publicPost), true);
+  assert.equal(policies.canReadPostMedia(guest, ownClubPost), false);
+});
+
 test('他人不能读仅自己的内容', () => {
   const priv = makePost({ visibility: VISIBILITY.PRIVATE });
   assert.equal(policies.canReadPost(other, priv), false);

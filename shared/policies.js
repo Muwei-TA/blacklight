@@ -101,6 +101,17 @@ function canReadPost(viewer, post) {
   return false;
 }
 
+/**
+ * 媒体权限比正文历史读取更窄。被移除成员可保留自己的历史正文，
+ * 但无法继续拿到任何附件；公开帖仍可由访客读取媒体。
+ */
+function canReadPostMedia(viewer, post) {
+  if (!viewer || viewer.memberStatus === MEMBER_STATUS.REMOVED) return false;
+  if (!canReadPost(viewer, post)) return false;
+  if (post.visibility === VISIBILITY.PUBLIC) return true;
+  return viewer.isMember;
+}
+
 /** 能否出现在信息流 / 话题 / 搜索 / 文集目录等聚合入口 */
 function canListPost(viewer, post) {
   if (!post) return false;
@@ -334,6 +345,7 @@ module.exports = {
   GUEST_VIEWER,
   isOwner,
   canReadPost,
+  canReadPostMedia,
   canListPost,
   canInteract,
   canComment,
