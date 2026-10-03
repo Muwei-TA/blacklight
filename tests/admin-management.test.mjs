@@ -153,6 +153,27 @@ test('invite revoke translates the Web inviteId field to the SQL id field', asyn
   assert.equal(calls[0].args.p_input.inviteId, undefined);
 });
 
+test('handover retention accepts all paged invite ids and rejects lists above the request bound', async () => {
+  const base = {
+    targetUserId: 'u_next',
+    expectedVersion: 4,
+    reason: '提交完整的新一届管理团队与邀请码保留清单',
+    team: [{ targetUserId: 'u_next', role: 'moderator', expectedVersion: 1 }],
+  };
+  const retained101 = Array.from({ length: 101 }, (_, index) => `invite-${index}`);
+  calls.length = 0;
+  await management.createHandover({ ...base, retainInviteIds: retained101 }, ctx(moderator));
+  assert.equal(calls[0].args.p_action, 'handovers.create');
+  assert.equal(calls[0].args.p_input.retainInviteIds.length, 101);
+
+  calls.length = 0;
+  await assert.rejects(
+    management.createHandover({ ...base, retainInviteIds: Array.from({ length: 5001 }, (_, index) => `invite-${index}`) }, ctx(moderator)),
+    /保留邀请码清单不合法/,
+  );
+  assert.equal(calls.length, 0, 'oversized invite lists fail before the database RPC');
+});
+
 test('team primary accepts the Web target and forwards both SQL versions', async () => {
   calls.length = 0;
   await management.setPrimary({

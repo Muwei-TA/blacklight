@@ -309,7 +309,7 @@ async function createHandover(payload = {}, ctx) {
   const retainInviteIds = Array.isArray(payload.retainInviteIds)
     ? payload.retainInviteIds.map((id) => validators.requireId(id, 'retainInviteIds'))
     : [];
-  if (retainInviteIds.length > 100 || new Set(retainInviteIds).size !== retainInviteIds.length) {
+  if (retainInviteIds.length > 5000 || new Set(retainInviteIds).size !== retainInviteIds.length) {
     throw errors.invalidInput('保留邀请码清单不合法', { field: 'retainInviteIds' });
   }
   let termEndAt;
