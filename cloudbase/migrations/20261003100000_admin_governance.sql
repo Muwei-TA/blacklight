@@ -151,6 +151,16 @@ BEGIN
   IF position(needle IN definition)=0 THEN RAISE EXCEPTION 'PLATFORM_LIST_PATCH_POINT_MISSING'; END IF;
   EXECUTE replace(definition,needle,replacement);
 
+  definition:=pg_get_functiondef('public.hg_platform_clubs(text,text,jsonb)'::regprocedure);
+  needle:=$needle$  after_doc:=after_doc||jsonb_build_object('platformVersion',current_version+1,'updatedAt',stamp);$needle$;
+  replacement:=$replacement$
+  IF p_action='update' AND after_doc->>'description' IS DISTINCT FROM before_doc->>'description' THEN
+    after_doc:=after_doc||jsonb_build_object('settingsVersion',COALESCE(NULLIF(before_doc->>'settingsVersion','')::int,1)+1);
+  END IF;
+  $replacement$||needle;
+  IF position(needle IN definition)=0 THEN RAISE EXCEPTION 'PLATFORM_SETTINGS_VERSION_PATCH_POINT_MISSING'; END IF;
+  EXECUTE replace(definition,needle,replacement);
+
   definition:=pg_get_functiondef('public.hg_request_account_deletion(text)'::regprocedure);
   needle:=$needle$  UPDATE hg_memberships SET doc=doc||jsonb_build_object('status','removed','removedAt',stamp,$needle$;
   replacement:=$replacement$
@@ -760,7 +770,7 @@ DECLARE actor jsonb; club jsonb; term jsonb; app jsonb; invite jsonb; request js
   admission_mode text; current_rules text; next_rules text; changes jsonb; team jsonb; base_team jsonb;
   primary_id text; expected integer; actual integer; member_version integer; manager_count integer;
   max_uses integer; ttl_seconds integer; expires_at text; term_member_count integer; pending_management integer;
-  notification_summary text;
+  notification_summary text; description_changed boolean;
   now_text text:=to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
   page_limit integer; status_filter text; cursor_value text; cursor_time text; cursor_id text; decoded_cursor text;
   dto_item jsonb; items jsonb; result jsonb; next_cursor text; has_more boolean; more_count integer; dev_count integer;
@@ -1238,6 +1248,8 @@ BEGIN
     IF changes ? 'charter' AND (jsonb_typeof(changes->'charter')<>'string'
       OR char_length(changes->>'charter')>5000) THEN RAISE EXCEPTION 'INVALID'; END IF;
     IF changes ? 'admissionMode' AND changes->>'admissionMode' NOT IN ('invite_required','closed') THEN RAISE EXCEPTION 'INVALID'; END IF;
+    description_changed:=changes ? 'description'
+      AND changes->>'description' IS DISTINCT FROM COALESCE(club->>'description','');
     current_rules:=COALESCE(NULLIF(club->>'rulesVersion',''),'v1.0');
     next_rules:=current_rules;
     IF (changes ? 'charter' AND changes->>'charter' IS DISTINCT FROM COALESCE(club->>'charter',''))
@@ -1246,7 +1258,9 @@ BEGIN
         next_rules:='v'||split_part(substr(current_rules,2),'.',1)||'.'||(split_part(current_rules,'.',2)::int+1)::text;
       ELSE next_rules:='v1.1'; END IF;
     END IF;
-    club:=club||changes||jsonb_build_object('settingsVersion',actual+1,'rulesVersion',next_rules,'updatedAt',now_text);
+    club:=club||changes||jsonb_build_object('settingsVersion',actual+1,'rulesVersion',next_rules,'updatedAt',now_text)
+      ||CASE WHEN description_changed THEN jsonb_build_object('platformVersion',COALESCE(NULLIF(club->>'platformVersion','')::int,0)+1)
+        ELSE '{}'::jsonb END;
     UPDATE public.hg_club_config SET doc=club WHERE id=p_club_id;
     PERFORM public.hg_admin_audit(p_club_id,p_actor_id,'settings.update','club',p_club_id,reason,
       jsonb_build_object('changedFields',to_jsonb(ARRAY(SELECT jsonb_object_keys(changes))),'rulesVersion',next_rules));

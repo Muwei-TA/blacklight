@@ -12,9 +12,10 @@ if (!databaseUrl || new URL(databaseUrl).pathname !== '/blacklight_test' || proc
 const migrationSql = await readFile(new URL('../../cloudbase/migrations/20261003100000_admin_governance.sql', import.meta.url), 'utf8');
 const managementFunctionSql = migrationSql.match(/CREATE FUNCTION public\.hg_admin_management\([\s\S]*?\nEND \$\$;/)?.[0];
 const applyInvitationFunctionSql = migrationSql.match(/CREATE FUNCTION public\.hg_apply_invitation\([\s\S]*?\nEND \$\$;/)?.[0];
+const platformDescriptionPatchSql = migrationSql.match(/definition:=pg_get_functiondef\('public\.hg_platform_clubs\(text,text,jsonb\)'::regprocedure\);\s*needle:=\$needle\$[ ]{2}after_doc:=after_doc\|\|jsonb_build_object\('platformVersion',current_version\+1,'updatedAt',stamp\);\$needle\$;\s*replacement:=\$replacement\$[\s\S]*?\$replacement\$\|\|needle;\s*IF position\(needle IN definition\)=0 THEN RAISE EXCEPTION 'PLATFORM_SETTINGS_VERSION_PATCH_POINT_MISSING'; END IF;\s*EXECUTE replace\(definition,needle,replacement\);/)?.[0];
 const serviceRolePoliciesSql = [...migrationSql.matchAll(/DROP POLICY IF EXISTS [^;]+;\s*CREATE POLICY [^;]+;/g)].map(([sql]) => sql);
-if (!managementFunctionSql || !applyInvitationFunctionSql || serviceRolePoliciesSql.length !== 4) {
-  throw new Error('Could not isolate governance functions and policies for transaction-local integration tests.');
+if (!managementFunctionSql || !applyInvitationFunctionSql || !platformDescriptionPatchSql || serviceRolePoliciesSql.length !== 4) {
+  throw new Error('Could not isolate governance functions, platform patch, and policies for transaction-local integration tests.');
 }
 
 async function withMigration(client, callback) {
@@ -25,6 +26,7 @@ async function withMigration(client, callback) {
     if (installed.rows[0].value) {
       await client.query(managementFunctionSql.replace('CREATE FUNCTION', 'CREATE OR REPLACE FUNCTION'));
       await client.query(applyInvitationFunctionSql.replace('CREATE FUNCTION', 'CREATE OR REPLACE FUNCTION'));
+      await client.query(`DO $patch_description$ DECLARE definition text; needle text; replacement text; BEGIN ${platformDescriptionPatchSql} END $patch_description$;`);
       for (const policySql of serviceRolePoliciesSql) await client.query(policySql);
     } else {
       await client.query(migrationSql);
@@ -102,6 +104,106 @@ test('admin governance exposes scoped service-role PostgreSQL contracts', async 
           (SELECT count(*) FROM public.hg_invite_codes WHERE id=$5) AS invites
       `, [`term:${probe}`, `request:${probe}`, `user:${probe}`, `club:${probe}`, `invite:${probe}`]);
       assert.deepEqual(visible.rows[0], { terms: '1', requests: '1', limits: '1', invites: '1' });
+    });
+  } finally {
+    await client.end();
+  }
+});
+
+test('description edits invalidate stale settings and platform snapshots in both directions', async () => {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  const prefix = `admin-gov-description-version-${process.pid}`;
+  const clubId = `${prefix}-club`;
+  const moderator = `${prefix}-moderator`;
+  const developer = `${prefix}-developer`;
+  const management = async (action, input = {}) => (await client.query(
+    'SELECT public.hg_admin_management($1,$2,$3::jsonb,$4) AS value',
+    [moderator, action, JSON.stringify(input), clubId],
+  )).rows[0].value;
+  const platform = async (action, input = {}) => (await client.query(
+    'SELECT public.hg_platform_clubs($1,$2,$3::jsonb) AS value',
+    [developer, action, JSON.stringify(input)],
+  )).rows[0].value;
+  const expectMarker = async (promise, marker) => {
+    await client.query('SAVEPOINT expected_failure');
+    try {
+      await assert.rejects(promise, new RegExp(marker));
+    } finally {
+      await client.query('ROLLBACK TO SAVEPOINT expected_failure');
+      await client.query('RELEASE SAVEPOINT expected_failure');
+    }
+  };
+
+  try {
+    await withMigration(client, async () => {
+      await client.query('INSERT INTO public.hg_users(id,doc) VALUES($1,$2::jsonb),($3,$4::jsonb)', [
+        moderator, JSON.stringify({ _id: moderator, status: 'active', displayName: '社团管理员' }),
+        developer, JSON.stringify({ _id: developer, status: 'active', platformRole: 'developer' }),
+      ]);
+      await client.query('INSERT INTO public.hg_memberships(id,doc) VALUES($1,$2::jsonb)', [
+        `${moderator}:${clubId}`,
+        JSON.stringify({ _id: `${moderator}:${clubId}`, userId: moderator, clubId, status: 'active', role: 'moderator', version: 1 }),
+      ]);
+      await client.query('INSERT INTO public.hg_club_config(id,doc) VALUES($1,$2::jsonb)', [
+        clubId,
+        JSON.stringify({
+          _id: clubId, name: '版本同步测试社团', status: 'active', description: '初始描述', rulesVersion: 'v1.0',
+          moderatorUserId: moderator, settingsVersion: 2, platformVersion: 2,
+        }),
+      ]);
+      await client.query('SET LOCAL ROLE service_role');
+
+      const settingsSnapshot = await management('settings.get');
+      const platformSnapshot = (await platform('list')).list.find((club) => club.id === clubId);
+      assert.equal(settingsSnapshot.version, 2);
+      assert.equal(platformSnapshot.version, 2);
+
+      const moderatorWrite = await management('settings.update', {
+        expectedVersion: settingsSnapshot.version, description: '社团管理员的新简介', reason: '同步社团说明并测试旧平台快照失效',
+      });
+      assert.equal(moderatorWrite.version, 3);
+      let stored = await client.query('SELECT doc FROM public.hg_club_config WHERE id=$1', [clubId]);
+      assert.equal(stored.rows[0].doc.settingsVersion, 3);
+      assert.equal(stored.rows[0].doc.platformVersion, 3);
+      assert.equal(stored.rows[0].doc.description, '社团管理员的新简介');
+      await expectMarker(() => platform('update', {
+        id: clubId, expectedVersion: platformSnapshot.version,
+        config: { description: '开发者用旧快照写入的简介' }, reason: '拒绝基于旧平台版本覆盖管理员简介',
+      }), 'VERSION_CONFLICT');
+
+      const freshPlatformSnapshot = (await platform('list')).list.find((club) => club.id === clubId);
+      const freshSettingsSnapshot = await management('settings.get');
+      assert.equal(freshPlatformSnapshot.version, 3);
+      assert.equal(freshSettingsSnapshot.version, 3);
+      const developerWrite = await platform('update', {
+        id: clubId, expectedVersion: freshPlatformSnapshot.version,
+        config: { description: '平台开发者更新的简介' }, reason: '更新社团简介并测试旧设置快照失效',
+      });
+      assert.equal(developerWrite.version, 4);
+      stored = await client.query('SELECT doc FROM public.hg_club_config WHERE id=$1', [clubId]);
+      assert.equal(stored.rows[0].doc.settingsVersion, 4);
+      assert.equal(stored.rows[0].doc.platformVersion, 4);
+      assert.equal(stored.rows[0].doc.description, '平台开发者更新的简介');
+      await expectMarker(() => management('settings.update', {
+        expectedVersion: freshSettingsSnapshot.version, description: '管理员用旧快照写入的简介',
+        reason: '拒绝基于旧设置版本覆盖平台简介',
+      }), 'VERSION_CONFLICT');
+
+      const platformVersionBeforeUnrelated = (await platform('list')).list.find((club) => club.id === clubId).version;
+      await platform('update', {
+        id: clubId, expectedVersion: platformVersionBeforeUnrelated,
+        config: { name: '平台侧仅修改名称' }, reason: '校验名称变更不影响设置版本',
+      });
+      stored = await client.query('SELECT doc FROM public.hg_club_config WHERE id=$1', [clubId]);
+      assert.equal(stored.rows[0].doc.settingsVersion, 4);
+      const settingsVersionBeforeUnrelated = (await management('settings.get')).version;
+      await management('settings.update', {
+        expectedVersion: settingsVersionBeforeUnrelated, charter: '平台治理测试章程文本。', reason: '校验章程变更不影响平台版本',
+      });
+      stored = await client.query('SELECT doc FROM public.hg_club_config WHERE id=$1', [clubId]);
+      assert.equal(stored.rows[0].doc.settingsVersion, 5);
+      assert.equal(stored.rows[0].doc.platformVersion, 5);
     });
   } finally {
     await client.end();
