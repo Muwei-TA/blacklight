@@ -9,6 +9,7 @@
  */
 
 const { createRouter } = require('./shared/router');
+const { withCloudbaseWriteGate } = require('./shared/write-gate');
 
 const session = require('./domain/session');
 const platform = require('./domain/platform');
@@ -125,6 +126,6 @@ function createHandler({ identityResolver = null } = {}) {
   return createRouter(handlers, { name: 'api', identityResolver });
 }
 
-exports.main = createHandler();
+exports.main = withCloudbaseWriteGate(createHandler());
 exports.handlers = handlers;
 exports.createHandler = createHandler;

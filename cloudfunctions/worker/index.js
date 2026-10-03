@@ -13,6 +13,7 @@
 const { COLLECTIONS, REVIEW_TASK_STATUS } = require('./shared/constants');
 const db = require('./shared/db');
 const { scrubForLog } = require('./shared/anonymity');
+const { withCloudbaseWriteGate } = require('./shared/write-gate');
 
 const reviewTasks = require('./tasks/review');
 const mediaTasks = require('./tasks/media');
@@ -287,7 +288,7 @@ async function processClaimedTasks(tasks, summary, clubSummary) {
   }
 }
 
-exports.main = async (event = {}, context = {}) => {
+const main = async (event = {}, context = {}) => {
   let cloud;
   let source;
   if (process.env.RUNTIME_KIND === 'nas' && context.localRuntime === true) {
@@ -428,6 +429,8 @@ exports.main = async (event = {}, context = {}) => {
   console.log('[worker] summary', summary);
   return { code: 0, data: summary };
 };
+
+exports.main = withCloudbaseWriteGate(main);
 
 module.exports._internals = {
   MAX_ATTEMPTS,
