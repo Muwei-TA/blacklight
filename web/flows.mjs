@@ -1,4 +1,4 @@
-import { escapeHtml as h, idempotencyKey } from './core.mjs';
+import { escapeHtml as h, idempotencyKey, parseInternalRoute } from './core.mjs';
 
 function modal(title, fields, confirmText = '确认', description = '') {
   return new Promise((resolve) => {
@@ -66,10 +66,15 @@ export function createFlows({ state, api, navigate, refreshAccount, loadRoute, s
     try {
       if (['register', 'password'].includes(name) && values.password !== values.confirmPassword) throw new Error('两次输入的密码不一致');
       if (['login', 'register'].includes(name)) {
+        const continuation = parseInternalRoute(state.route.query?.next);
         await api.auth(name, values);
         form.reset();
         await refreshAccount();
-        if (isCurrent(token)) { navigate(state.clubId ? 'home' : 'clubs'); toast(name === 'register' ? '账号已创建，选择一个社团开始' : '欢迎回到灯下'); }
+        if (isCurrent(token)) {
+          if (continuation) navigate(continuation.name, continuation.id, continuation.query);
+          else navigate(state.clubId ? 'home' : 'clubs');
+          toast(name === 'register' ? '账号已创建，欢迎来到灯下' : '欢迎回到灯下');
+        }
         return;
       }
       if (name === 'search') { navigate('search', '', { q: values.q.trim() }); return; }
@@ -87,7 +92,7 @@ export function createFlows({ state, api, navigate, refreshAccount, loadRoute, s
         const assetIds = await uploadFiles(form, clubId, draft);
         const input = { kind: values.kind, title: values.title, body: values.body, visibility: values.visibility, identityMode: values.identityMode, topicId: values.visibility === 'private' ? '' : values.topicId, boardId: values.visibility === 'private' ? '' : values.boardId, commentsEnabled: values.commentsEnabled === 'on' && values.visibility !== 'private', assetIds };
         const result = await action('posts/create', { ...input, idempotencyKey: idempotencyKey(draft, input) });
-        if (isCurrent(token)) { setClean(); navigate('post', result.id || result.postId); toast(result.state === 'published' ? '这段表达已保存' : '已收到，等待审核后展示'); }
+        if (isCurrent(token)) { setClean(); navigate('post', result.id || result.postId); toast(result.state === 'private_saved' ? '已保存，仅自己可见' : result.state === 'published' ? '这段表达已发布' : '已收到，等待审核后展示'); }
         return;
       }
       if (name === 'resubmit') {
@@ -124,8 +129,16 @@ export function createFlows({ state, api, navigate, refreshAccount, loadRoute, s
     if (command === 'reply-to') {
       const form = document.querySelector('form[data-form="comment"]');
       form.elements.replyToId.value = button.dataset.id;
-      form.querySelector('#reply-target').textContent = `正在回应 ${button.dataset.name}（清空页面可取消）`;
-      form.querySelector('#reply-target').hidden = false;
+      form.querySelector('#reply-target').textContent = `正在回应 ${button.dataset.name}`;
+      form.querySelector('#reply-context').hidden = false;
+      form.elements.body.focus();
+      return;
+    }
+    if (command === 'cancel-reply') {
+      const form = document.querySelector('form[data-form="comment"]');
+      form.elements.replyToId.value = '';
+      form.querySelector('#reply-target').textContent = '';
+      form.querySelector('#reply-context').hidden = true;
       form.elements.body.focus();
       return;
     }

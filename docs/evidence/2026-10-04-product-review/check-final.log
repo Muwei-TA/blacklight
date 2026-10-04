@@ -1,0 +1,16 @@
+
+> heiguang-shudong-backend@0.1.0 check
+> node scripts/check.mjs
+
+[1/5] 语法与编码
+      js/mjs: 134, json: 11
+[2/5] 架构纪律
+[3/5] DTO 安全
+[4/5] api 路由
+      actions: 100
+[5/5] 云函数完整性
+      functions: api, review-callback, worker
+[6/6] 前后端契约一致性
+      fe 引用: 99, be 实现: 100, 漂移: 0, 前端未引用: 1
+
+OK: 全部检查通过

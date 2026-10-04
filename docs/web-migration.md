@@ -14,6 +14,8 @@
 
 浏览器端仅保存选中社团标识这一项偏好；Cookie 为 HttpOnly，CSRF 令牌在内存。网站不会自动绑定同昵称的微信账号，不会把合成身份当成微信 openid。
 
+产品经理模拟审阅后的体验优化包括：发布/重提的浏览器历史离开确认、私密保存反馈、登录/注册后继续原任务、注册时另页阅读隐私、从消息/收藏阅读后返回来源，以及取消回复对象时保留正文。审阅方法与验收见 [产品体验审阅记录](evidence/2026-10-04-product-review/README.md)。草稿只保留在当前页面；确认丢弃或刷新离开后不提供持久恢复。
+
 ## 本地运行
 
 需要 Node >=20 与 PostgreSQL 16。首次安装：
@@ -124,3 +126,11 @@ WEB_BROWSER_BASE=http://127.0.0.1:3000 PLAYWRIGHT_MODULE=/path/to/playwright/ind
 ```
 
 结果和截图在 `docs/evidence/2026-10-04-web/`。这些是本地开发验收证据，不代表已有生产数据库迁移或公网部署。
+
+产品体验回归脚本 `tests/browser/product-experience.mjs` 另需本轮截图夹具（收藏、消息、一级回应与非成员账号），在同一隔离测试环境显式运行：
+
+```sh
+WEB_BROWSER_BASE=http://127.0.0.1:3000 PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs WEB_BROWSER_EVIDENCE=/tmp/blacklight-product-review node tests/browser/product-experience.mjs
+```
+
+它验证 8 个场景，并自行删除本轮新建的私密验收文章；截图账号只在隔离库使用。复现初审缺陷的脚本与修复后的验收脚本作用不同，不能将初审的“观察到缺陷”当作修复通过。

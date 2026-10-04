@@ -1,0 +1,4 @@
+
+> heiguang-shudong-backend@0.1.0 lint
+> npx eslint . --ext .js,.mjs
+

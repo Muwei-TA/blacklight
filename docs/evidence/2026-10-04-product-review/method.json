@@ -1,0 +1,54 @@
+{
+  "scope": "Simulated browser experience review of Blacklight website; not real-user interviews",
+  "personas": [
+    "first-time visitor",
+    "ordinary member",
+    "club moderator"
+  ],
+  "referenceAgent": "https://github.com/msitarzewski/agency-agents/blob/main/product/product-manager.md",
+  "skills": [
+    "https://github.com/phuryn/pm-skills/blob/main/pm-market-research/skills/customer-journey-map/SKILL.md",
+    "https://github.com/phuryn/pm-skills/blob/main/pm-execution/skills/test-scenarios/SKILL.md"
+  ],
+  "acceptedConstraints": [
+    "Preserve approved Gcores-inspired visual direction",
+    "Account/password login",
+    "Existing membership/privacy/review authorization",
+    "No deployment or production data changes"
+  ],
+  "evaluation": [
+    "Observed task completion",
+    "Route context retained",
+    "Action discoverability",
+    "Feedback and recovery",
+    "Mobile usability",
+    "Privacy expectations"
+  ],
+  "retrievedSources": [
+    {
+      "name": "agency-manager",
+      "url": "https://raw.githubusercontent.com/msitarzewski/agency-agents/main/product/product-manager.md",
+      "status": 200,
+      "bytes": 22687,
+      "sha256": "4a3fe4661e72e5173877bcba7c362392181774b20efc27ac1789171e98676c9d"
+    },
+    {
+      "name": "customer-journey-map",
+      "url": "https://raw.githubusercontent.com/phuryn/pm-skills/main/pm-market-research/skills/customer-journey-map/SKILL.md",
+      "bytes": 3268,
+      "status": 200,
+      "sha256": "656c0e16318b3b24870065a8eabb8a116b72e47c167472836ce76ea97ec5c75e"
+    },
+    {
+      "name": "customer-test-scenarios",
+      "url": "https://raw.githubusercontent.com/phuryn/pm-skills/main/pm-execution/skills/test-scenarios/SKILL.md",
+      "bytes": 3472,
+      "status": 200,
+      "sha256": "2dc10ebb6359604275f26234d3c66c9ccc952e501ad5b685c23a5c0f34f634d4"
+    }
+  ],
+  "searchQueries": [
+    "github product manager AI agent skill usability review",
+    "agency agents product manager msitarzewski github"
+  ]
+}

@@ -2345,3 +2345,27 @@ dialog p {
 .card-kicker {
   overflow-wrap: anywhere;
 }
+
+.auth-intent {
+  padding: 12px 14px;
+  background: var(--accent-soft);
+  border-radius: 4px;
+}
+.reply-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: var(--accent-soft);
+  border-radius: 4px;
+}
+.reply-context p {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.reply-context button {
+  flex: none;
+}

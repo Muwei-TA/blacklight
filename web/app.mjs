@@ -51,7 +51,7 @@ function restoreReply(draft) {
   form.elements.replyToId.value = draft.replyToId;
   form.elements.anonymous.checked = draft.anonymous;
   form.querySelector('#reply-target').textContent = draft.target;
-  form.querySelector('#reply-target').hidden = !draft.replyToId;
+  form.querySelector('#reply-context').hidden = !draft.replyToId;
 }
 async function refreshAccount() {
   const token = activeToken;
@@ -127,7 +127,7 @@ async function loadRoute() {
   render();
   const accountPages = ['login', 'register', 'privacy', 'clubs', 'me', 'settings', 'confirmations'];
   const privatePages = ['write', 'resubmit', 'contents', 'settings', 'messages', 'appeals', 'confirmations'];
-  if (!state.account?.authenticated && privatePages.includes(route.name)) { navigate('login'); return; }
+  if (!state.account?.authenticated && privatePages.includes(route.name)) { navigate('login', '', { next: routeUrl(route.name, route.id, route.query) }); return; }
   if (!state.clubId && !accountPages.includes(route.name)) { state.loading = false; render(); return; }
   try {
     let session = state.session;
@@ -145,7 +145,7 @@ async function loadRoute() {
     }
   } catch (error) {
     if (!scope.current(token)) return;
-    if (error.status === 401) { state.account = null; state.session = null; api.clear(); navigate('login'); toast('登录状态已过期，请重新登录'); return; }
+    if (error.status === 401) { state.account = null; state.session = null; api.clear(); navigate('login', '', { next: routeUrl(route.name, route.id, route.query) }); toast('登录状态已过期，请重新登录'); return; }
     state.error = error.message;
     state.loading = false;
     render();
@@ -188,12 +188,17 @@ root.addEventListener('submit', (event) => {
   flows.submit(form);
 });
 root.addEventListener('click', (event) => {
+  const anchor = event.target.closest('a[href]');
+  const leavesPage = anchor && anchor.target !== '_blank' && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0 && anchor.getAttribute('href') !== location.hash;
+  if (leavesPage && dirty) {
+    if (!confirm('正文草稿仅保留在当前页面。确定离开并丢弃这段草稿？')) { event.preventDefault(); return; }
+    dirty = false;
+  }
   const button = event.target.closest('[data-action]');
   if (button) flows.click(button);
-  const anchor = event.target.closest('a[href]');
-  if (anchor && dirty && anchor.getAttribute('href') !== location.hash && !confirm('正文草稿仅保留在当前页面。确定离开并丢弃这段草稿？')) event.preventDefault();
 });
 root.addEventListener('change', (event) => {
+  if (event.target.closest('form[data-form="write"],form[data-form="resubmit"]')) dirty = true;
   if (event.target.matches('[data-club-select]')) {
     if (dirty && !confirm('切换社团会丢弃当前草稿。确定继续？')) { event.target.value = state.clubId; return; }
     selectClub(event.target.value);
@@ -212,7 +217,19 @@ root.addEventListener('change', (event) => {
 });
 root.addEventListener('input', (event) => { if (event.target.closest('form[data-form="write"],form[data-form="resubmit"]')) dirty = true; });
 window.addEventListener('beforeunload', (event) => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
-window.addEventListener('hashchange', () => { window.scrollTo(0, 0); loadRoute(); });
+window.addEventListener('hashchange', () => {
+  const current = routeUrl(state.route.name, state.route.id, state.route.query);
+  if (dirty && location.hash !== current) {
+    if (!confirm('正文草稿仅保留在当前页面。确定离开并丢弃这段草稿？')) {
+      // Preserve the live form; do not reload it or persist its private contents.
+      history.replaceState(history.state, '', current);
+      return;
+    }
+    dirty = false;
+  }
+  window.scrollTo(0, 0);
+  loadRoute();
+});
 async function boot() {
   try { state.clubId = localStorage.getItem('blacklight.selectedClub') || ''; } catch { /* optional preference */ }
   try { await refreshAccount(); }

@@ -1,0 +1,121 @@
+✖ authentication continuations accept only known internal routes and preserve task query (5.427668ms)
+✖ guests joining a club see authentication choices instead of a form they cannot submit (0.699002ms)
+✖ reading privacy preserves the registration form and authentication continuation (0.536618ms)
+✖ post opened from bookmarks returns to bookmarks, while invalid return paths fall back to home (0.61255ms)
+✖ notification post links preserve the originating notification tab (0.547537ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 0
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 76.23901
+
+✖ failing tests:
+
+test at tests/web-experience.test.mjs:7:1
+✖ authentication continuations accept only known internal routes and preserve task query (5.427668ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'undefined'
+  - 'function'
+  
+      at TestContext.<anonymous> (file:///workspace/blacklight/tests/web-experience.test.mjs:8:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.start (node:internal/test_runner/test:1242:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/web-experience.test.mjs:14:1
+✖ guests joining a club see authentication choices instead of a form they cannot submit (0.699002ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /data-form="join"/. Input:
+  
+  '<header class="page-heading"><div><span class="eyebrow">JOIN / 社团</span><h1>测试社团</h1></div></header><section class="panel"><h2>社团约定</h2><p class="prose">约定</p><span class="muted">规则版本 </span></section><section class="panel"><form data-form="join"><label class="field"><span>社内昵称</span><input name="displayName" type="text" required maxlength="20" value=""></label><label class="field"><span>邀请码</span><input name="inviteCode" type="text" required maxlength="64" autocomplete="off" placeholder="输入管理员提供的邀请码"></label><label class="check"><input type="checkbox" required> 我已阅读并同意以上社团约定。</label><p class="form-error" role="alert" hidden></p><button class="button primary" type="submit">提交加入申请 <svg class="icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5"/></svg></button></form></section>'
+  
+      at TestContext.<anonymous> (file:///workspace/blacklight/tests/web-experience.test.mjs:16:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '<header class="page-heading"><div><span class="eyebrow">JOIN / 社团</span><h1>测试社团</h1></div></header><section class="panel"><h2>社团约定</h2><p class="prose">约定</p><span class="muted">规则版本 </span></section><section class="panel"><form data-form="join"><label class="field"><span>社内昵称</span><input name="displayName" type="text" required maxlength="20" value=""></label><label class="field"><span>邀请码</span><input name="inviteCode" type="text" required maxlength="64" autocomplete="off" placeholder="输入管理员提供的邀请码"></label><label class="check"><input type="checkbox" required> 我已阅读并同意以上社团约定。</label><p class="form-error" role="alert" hidden></p><button class="button primary" type="submit">提交加入申请 <svg class="icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5"/></svg></button></form></section>',
+    expected: /data-form="join"/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at tests/web-experience.test.mjs:21:1
+✖ reading privacy preserves the registration form and authentication continuation (0.536618ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /href="#\/privacy"[^>]*target="_blank"/. Input:
+  
+  '<header class="page-heading"><div><span class="eyebrow">WELCOME / 黑光</span><h1>让我们认识你</h1><p>用文字相遇，在这里自在表达。</p></div></header><section class="panel auth-panel"><div class="auth-tabs"><a href="#/login" class="">登录</a><a href="#/register" class="selected">注册</a></div><form data-form="register"><label class="field"><span>账号</span><input name="username" type="text" required minlength="3" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_]{2,31}" autocomplete="username" placeholder="字母、数字或下划线"></label><label class="field"><span>你希望被怎样称呼</span><input name="displayName" type="text" required maxlength="20" autocomplete="nickname" placeholder="昵称（与登录账号不同）"></label><label class="field"><span>密码</span><input name="password" type="password" required minlength="10" maxlength="128" autocomplete="new-password" placeholder="至少 10 个字符"></label><label class="field"><span>再输入一次密码</span><input name="confirmPassword" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></label><label class="check"><input type="checkbox" name="agreement" required> 我已阅读<a href="#/privacy">隐私说明</a>，了解账号注册不代表已加入社团。</label><p class="form-error" role="alert" hidden></p><button class="button primary wide" type="submit">创建账号 <svg class="icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5"/></svg></button></form><p class="muted">注册后使用管理员提供的邀请码加入社团。</p></section>'
+  
+      at TestContext.<anonymous> (file:///workspace/blacklight/tests/web-experience.test.mjs:23:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '<header class="page-heading"><div><span class="eyebrow">WELCOME / 黑光</span><h1>让我们认识你</h1><p>用文字相遇，在这里自在表达。</p></div></header><section class="panel auth-panel"><div class="auth-tabs"><a href="#/login" class="">登录</a><a href="#/register" class="selected">注册</a></div><form data-form="register"><label class="field"><span>账号</span><input name="username" type="text" required minlength="3" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_]{2,31}" autocomplete="username" placeholder="字母、数字或下划线"></label><label class="field"><span>你希望被怎样称呼</span><input name="displayName" type="text" required maxlength="20" autocomplete="nickname" placeholder="昵称（与登录账号不同）"></label><label class="field"><span>密码</span><input name="password" type="password" required minlength="10" maxlength="128" autocomplete="new-password" placeholder="至少 10 个字符"></label><label class="field"><span>再输入一次密码</span><input name="confirmPassword" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></label><label class="check"><input type="checkbox" name="agreement" required> 我已阅读<a href="#/privacy">隐私说明</a>，了解账号注册不代表已加入社团。</label><p class="form-error" role="alert" hidden></p><button class="button primary wide" type="submit">创建账号 <svg class="icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5"/></svg></button></form><p class="muted">注册后使用管理员提供的邀请码加入社团。</p></section>',
+    expected: /href="#\/privacy"[^>]*target="_blank"/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/web-experience.test.mjs:27:1
+✖ post opened from bookmarks returns to bookmarks, while invalid return paths fall back to home (0.61255ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /class="text-link back-link" href="#\/contents\/bookmark"/. Input:
+  
+  '<a class="text-link back-link" href="#/home">← 回到树洞</a><article class="panel reading"><div class="post-meta"><span class="avatar ">社</span><div><span>社内成员</span><small></small></div><span class="scope-label"></span></div><div class="prose post-body">正文</div><div class="media-grid"></div><div class="reading-actions"></div></article>\n' +
+    '    <section class="panel"><h2>回应 <span class="muted">0</span></h2><p class="muted">当前不可回应，请登录并确认成员资格。</p><div class="comments"><p class="muted">还没有回应。</p></div></section>'
+  
+      at TestContext.<anonymous> (file:///workspace/blacklight/tests/web-experience.test.mjs:30:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '<a class="text-link back-link" href="#/home">← 回到树洞</a><article class="panel reading"><div class="post-meta"><span class="avatar ">社</span><div><span>社内成员</span><small></small></div><span class="scope-label"></span></div><div class="prose post-body">正文</div><div class="media-grid"></div><div class="reading-actions"></div></article>\n    <section class="panel"><h2>回应 <span class="muted">0</span></h2><p class="muted">当前不可回应，请登录并确认成员资格。</p><div class="comments"><p class="muted">还没有回应。</p></div></section>',
+    expected: /class="text-link back-link" href="#\/contents\/bookmark"/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/web-experience.test.mjs:36:1
+✖ notification post links preserve the originating notification tab (0.547537ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /#\/post\/post-a\?back=%23%2Fmessages%2Fsystem/. Input:
+  
+  '<header class="page-heading"><div><span class="eyebrow">INBOX</span><h1>灯下的消息</h1><p>回应、审核结果与社团通知，都在这里。</p></div><button class="button " data-action="read-all" >全部标记已读</button></header><div class="tabs"><a class="" href="#/messages/reply">回应</a><a class="selected" href="#/messages/system">系统通知</a></div><article class="panel message-card unread"><small></small><h3><a href="#/post/post-a">审核结果</a></h3><p></p><a class="text-link" href="#/post/post-a">查看 <svg class="icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5"/></svg></a></article>'
+  
+      at TestContext.<anonymous> (file:///workspace/blacklight/tests/web-experience.test.mjs:38:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '<header class="page-heading"><div><span class="eyebrow">INBOX</span><h1>灯下的消息</h1><p>回应、审核结果与社团通知，都在这里。</p></div><button class="button " data-action="read-all" >全部标记已读</button></header><div class="tabs"><a class="" href="#/messages/reply">回应</a><a class="selected" href="#/messages/system">系统通知</a></div><article class="panel message-card unread"><small></small><h3><a href="#/post/post-a">审核结果</a></h3><p></p><a class="text-link" href="#/post/post-a">查看 <svg class="icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5"/></svg></a></article>',
+    expected: /#\/post\/post-a\?back=%23%2Fmessages%2Fsystem/,
+    operator: 'match',
+    diff: 'simple'
+  }
