@@ -5,6 +5,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { validateConfig } = require('./config');
+const { createWebAuth, validCsrf, buildCookie } = require('./web-auth');
+const { createWebHttp } = require('./web-http');
 const {
   ADMIN_WEB_ACTIONS,
   AdminWebAuthError,
@@ -70,7 +72,7 @@ function setCorsHeaders(res) {
   res.setHeader('access-control-max-age', '600');
 }
 
-function createServer({ adminWebAuth = createAdminWebAuth(), webActionHandler = null } = {}) {
+function createServer({ adminWebAuth = createAdminWebAuth(), webActionHandler = null, websiteAuth = createWebAuth() } = {}) {
   // Local HTTP API uses the same action handlers and envelope as the former
   // cloud function. The second router argument is server-created and never
   // comes from the JSON body.
@@ -83,6 +85,15 @@ function createServer({ adminWebAuth = createAdminWebAuth(), webActionHandler = 
   const adminActionHandler = webActionHandler || api.createHandler({
     identityResolver: async (context = {}) => context.adminWebIdentity || { openid: null, invalid: false },
   });
+
+  const websiteHandler = api.createHandler({ identityResolver: async (context = {}) => context.webIdentity || { openid: null, invalid: false } });
+  const handleWebsite = createWebHttp({ auth: websiteAuth, actionHandler: websiteHandler });
+  async function resolveAdminSession(req) {
+    return await adminWebAuth.resolveSession(req) || websiteAuth.resolveSession(req);
+  }
+  function validAdminCsrf(session, supplied) {
+    return session.website ? validCsrf(session.sessionToken, supplied) : validCsrfToken(session.sessionToken, supplied);
+  }
 
   async function handle(req, res) {
     const requestId = getRequestId();
@@ -100,6 +111,8 @@ function createServer({ adminWebAuth = createAdminWebAuth(), webActionHandler = 
       res.setHeader('x-frame-options', 'DENY');
       res.setHeader('content-security-policy', "frame-ancestors 'none'");
     }
+
+    if (await handleWebsite(req, res, pathname, requestId)) return;
 
     if (req.method === 'OPTIONS') {
       res.statusCode = 204;
@@ -219,7 +232,7 @@ function createServer({ adminWebAuth = createAdminWebAuth(), webActionHandler = 
 
     if (req.method === 'GET' && pathname === '/v1/admin/session') {
       try {
-        const session = await adminWebAuth.resolveSession(req);
+        const session = await resolveAdminSession(req);
         if (!session) throw new HttpError(401, 'unauthenticated', '请重新扫码登录');
         const suppliedOrigin = req.headers.origin;
         if (suppliedOrigin && normalizeOrigin(suppliedOrigin) !== session.origin) {
@@ -263,12 +276,12 @@ function createServer({ adminWebAuth = createAdminWebAuth(), webActionHandler = 
         if (body.payload !== undefined && (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload))) {
           throw new HttpError(400, 'invalid_input', '请求内容不合法');
         }
-        const session = await adminWebAuth.resolveSession(req);
+        const session = await resolveAdminSession(req);
         if (!session) throw new HttpError(401, 'unauthenticated', '请重新扫码登录');
         if (normalizeOrigin(req.headers.origin) !== session.origin) {
           throw new HttpError(403, 'invalid_origin', '管理台来源不匹配');
         }
-        if (!validCsrfToken(session.sessionToken, req.headers['x-csrf-token'])) {
+        if (!validAdminCsrf(session, req.headers['x-csrf-token'])) {
           throw new HttpError(403, 'csrf_failed', '页面状态已过期，请刷新后重试');
         }
         const result = await adminActionHandler({
@@ -288,16 +301,21 @@ function createServer({ adminWebAuth = createAdminWebAuth(), webActionHandler = 
       try {
         const body = await readJson(req, MAX_AUTH_BODY_BYTES);
         if (Object.keys(body).length > 0) throw new HttpError(400, 'invalid_input', '请求内容不合法');
-        const session = await adminWebAuth.resolveSession(req);
+        const session = await resolveAdminSession(req);
         if (!session) throw new HttpError(401, 'unauthenticated', '请重新扫码登录');
         if (normalizeOrigin(req.headers.origin) !== session.origin) {
           throw new HttpError(403, 'invalid_origin', '管理台来源不匹配');
         }
-        if (!validCsrfToken(session.sessionToken, req.headers['x-csrf-token'])) {
+        if (!validAdminCsrf(session, req.headers['x-csrf-token'])) {
           throw new HttpError(403, 'csrf_failed', '页面状态已过期，请刷新后重试');
         }
-        await adminWebAuth.revokeSession(session);
-        res.setHeader('set-cookie', buildSessionCookie('', { clear: true }));
+        if (session.website) {
+          await websiteAuth.revokeSession(session);
+          res.setHeader('set-cookie', buildCookie('', { secure: websiteAuth.secureCookie(), clear: true }));
+        } else {
+          await adminWebAuth.revokeSession(session);
+          res.setHeader('set-cookie', buildSessionCookie('', { clear: true }));
+        }
         sendJson(res, 200, { loggedOut: true });
       } catch (error) {
         sendAdminError(res, error, requestId, 'session_logout');

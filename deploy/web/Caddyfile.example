@@ -1,0 +1,5 @@
+# Replace with your domain; run Caddy on the same host as loopback-bound API.
+club.example.com {
+  reverse_proxy 127.0.0.1:3000
+  encode zstd gzip
+}

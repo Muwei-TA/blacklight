@@ -150,7 +150,7 @@
     root.innerHTML = `<main class="main" style="margin-left:0;min-height:100vh">
       <section class="login-stage">
         <aside class="login-aside"><div class="brand-mark">HEIGUANG · GOVERNANCE</div><div><h1>把治理工作<br />交还给团队</h1><p>社团设置、成员资格和届次交接，在清晰的角色范围内完成。</p></div><div class="brand-sub">黑光文学社 · 管理工作台</div></aside>
-        <div class="login-main"><div class="eyebrow">小程序确认登录</div><h2>社团治理工作台</h2><p>使用小程序扫码并确认登录；仅显示当前账号有权管理的社团。换届或权限变化后需重新登录。请核对确认页中的访问地址。</p>${qr}<div class="footer-note">如果访问地址或账号与你预期不符，请在小程序中拒绝。</div></div>
+        <div class="login-main"><div class="eyebrow">网站账号 / 小程序确认</div><h2>社团治理工作台</h2><p><a class="button button--primary" href="/#/login">使用网站账号登录</a> <a class="button" href="/#/me">返回成员网站</a></p><p>网站管理员登录后，从「我的」进入工作台；原有小程序二维码登录仍可使用。</p><p>使用小程序扫码并确认登录；仅显示当前账号有权管理的社团。换届或权限变化后需重新登录。请核对确认页中的访问地址。</p>${qr}<div class="footer-note">如果访问地址或账号与你预期不符，请在小程序中拒绝。</div></div>
       </section>
     </main>`;
   }

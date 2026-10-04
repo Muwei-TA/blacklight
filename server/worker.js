@@ -39,6 +39,8 @@ async function start() {
         `DELETE FROM public.hg_sessions
           WHERE expires_at <= NOW() OR revoked_at IS NOT NULL`,
       );
+      await pg.query("DELETE FROM public.hg_web_sessions WHERE expires_at <= NOW() OR revoked_at IS NOT NULL OR last_seen_at < NOW() - INTERVAL '24 hours'");
+      await pg.query("DELETE FROM public.hg_web_auth_limits WHERE window_started_at < NOW() - INTERVAL '1 day'");
       lastSessionCleanupAt = now;
       if (result.rowCount > 0) console.log('[worker] expired sessions removed', { count: result.rowCount });
     } catch (error) {

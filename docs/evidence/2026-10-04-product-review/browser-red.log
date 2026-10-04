@@ -1,0 +1,26 @@
+PASS Privacy opens separately and preserves registration fields
+FAIL Login resumes bookmarks instead of resetting to the home feed: Expected values to be strictly equal:
+FAIL Guest login continues joining the selected club: Expected values to be strictly equal:
+FAIL Browser Back cancellation preserves draft and approved departure confirms once: Expected values to be strictly equal:
+FAIL Private article reports only-self saved status and test content is removed: The input did not match the regular expression /已保存.*仅自己可见/. Input:
+FAIL Reply target can be cancelled without losing the response draft: Selected reply target needs a cancel control
+PASS Bookmarks and notification detail return to their originating list/tab
+PASS Changed pages fit desktop and phone, and anonymous authors remain unlinked
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Product experience acceptance failures
+
+5 !== 0
+
+    at file:///workspace/blacklight/tests/browser/product-experience.mjs:158:8 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 5,
+  expected: 0,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.19.0

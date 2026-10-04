@@ -3,7 +3,7 @@ set -euo pipefail
 
 MIGRATIONS_DIR="${LOCAL_MIGRATIONS_DIR:-/opt/blacklight/cloudbase-migrations}"
 COMPAT_DIR="${LOCAL_COMPAT_DIR:-/opt/blacklight/compat}"
-EXPECTED_MIGRATIONS=26
+EXPECTED_MIGRATIONS=27
 
 if [[ ! -r "${NAS_APP_DATABASE_PASSWORD_FILE:-}" ]]; then
   echo "local PG bootstrap requires NAS_APP_DATABASE_PASSWORD_FILE" >&2

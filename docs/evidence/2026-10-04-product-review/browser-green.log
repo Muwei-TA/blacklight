@@ -1,0 +1,8 @@
+PASS Privacy opens separately and preserves registration fields
+PASS Login resumes bookmarks instead of resetting to the home feed
+PASS Guest login continues joining the selected club
+PASS Browser Back cancellation preserves draft and approved departure confirms once
+PASS Private article reports only-self saved status and test content is removed
+PASS Reply target can be cancelled without losing the response draft
+PASS Bookmarks and notification detail return to their originating list/tab
+PASS Changed pages fit desktop and phone, and anonymous authors remain unlinked

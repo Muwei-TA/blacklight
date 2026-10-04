@@ -1,0 +1,13 @@
+{
+  "checks": [
+    "desktop login, scoped feed and screenshot passed",
+    "resonance and reply submission preserve unfinished reply",
+    "private browser composition and post detail passed",
+    "website cookie enters existing governance console",
+    "mobile registration, invitation, admin approval, scoped feed and no overflow passed",
+    "anonymous author has no profile link on mobile",
+    "logout, no persistent sensitive browser state and no JavaScript errors passed"
+  ],
+  "errors": [],
+  "date": "2026-10-04T04:33:17.863Z"
+}

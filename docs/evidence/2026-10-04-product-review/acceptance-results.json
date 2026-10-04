@@ -1,0 +1,38 @@
+{
+  "results": [
+    {
+      "name": "Privacy opens separately and preserves registration fields",
+      "passed": true
+    },
+    {
+      "name": "Login resumes bookmarks instead of resetting to the home feed",
+      "passed": true
+    },
+    {
+      "name": "Guest login continues joining the selected club",
+      "passed": true
+    },
+    {
+      "name": "Browser Back cancellation preserves draft and approved departure confirms once",
+      "passed": true
+    },
+    {
+      "name": "Private article reports only-self saved status and test content is removed",
+      "passed": true
+    },
+    {
+      "name": "Reply target can be cancelled without losing the response draft",
+      "passed": true
+    },
+    {
+      "name": "Bookmarks and notification detail return to their originating list/tab",
+      "passed": true
+    },
+    {
+      "name": "Changed pages fit desktop and phone, and anonymous authors remain unlinked",
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "date": "2026-10-04T04:34:45.705Z"
+}

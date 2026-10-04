@@ -226,3 +226,261 @@ tr:last-child td { border-bottom: 0; }
   .action-modal { align-items: end; padding: 0; }
   .action-modal__panel { width: 100%; max-height: 86vh; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); border-radius: 14px 14px 0 0; }
 }
+
+/* Approved community design, shared with the member website. */
+:root {
+  --paper: #f5f5f7;
+  --surface: #fff;
+  --ink: #27282e;
+  --body: #5e5e69;
+  --muted: #90909b;
+  --green: #ed3d59;
+  --green-dark: #d92745;
+  --green-soft: #fff0f3;
+  --clay: #ed3d59;
+  --clay-soft: #fff0f3;
+  --danger: #d22a43;
+  --danger-soft: #fff0f3;
+  --line: #e9e9ed;
+  --line-strong: #dddde5;
+  --shadow: none;
+  --serif: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --sans: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.rail {
+  width: 216px;
+  background: white;
+  color: var(--ink);
+  border-right: 1px solid var(--line);
+  padding: 28px 16px 24px;
+}
+.brand {
+  border-color: var(--line);
+  padding: 0 12px 22px;
+}
+.brand-mark {
+  color: var(--green);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+}
+.brand-name {
+  font-family: var(--sans);
+  font-size: 21px;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+}
+.brand-sub {
+  color: #a1a1aa;
+  font-size: 10px;
+}
+.nav {
+  gap: 4px;
+  margin-top: 23px;
+}
+.nav button {
+  min-height: 45px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #696973;
+  padding: 0 12px;
+}
+.nav button:hover {
+  background: #f7f7f9;
+  border-color: transparent;
+}
+.nav button[aria-current="page"] {
+  background: #efeff2;
+  color: #28282f;
+}
+.nav-index {
+  color: #babac3;
+  font-family: var(--sans);
+  font-size: 9px;
+}
+.nav button[aria-current="page"] .nav-index {
+  color: var(--green);
+}
+.rail-bottom {
+  border-color: var(--line);
+  padding: 20px 12px 0;
+}
+.rail-user {
+  font-weight: 600;
+  color: #696973;
+}
+.rail-role {
+  color: #a1a1aa;
+}
+.logout {
+  color: #9999a3;
+  font-size: 11px;
+}
+.main {
+  margin-left: 216px;
+  padding: 35px 40px 55px;
+}
+.topline {
+  margin-bottom: 27px;
+}
+h1 {
+  font-weight: 850;
+  font-size: 32px;
+  line-height: 1.4;
+}
+h2,
+.panel-head h2,
+.subheading {
+  font-weight: 750;
+}
+.lede {
+  font-size: 12px;
+  line-height: 1.9;
+  color: #9999a3;
+}
+.eyebrow {
+  font-size: 8px;
+  letter-spacing: 0.15em;
+  color: #aaaab2;
+}
+.panel {
+  box-shadow: none;
+  border-radius: 5px;
+  padding: 25px;
+}
+.panel--quiet {
+  background: #f4f4f7;
+}
+.panel--green {
+  background: #fff0f3;
+  border-color: #f3d3da;
+}
+.scope-control select,
+.field input,
+.field select,
+.field textarea {
+  border-radius: 4px;
+  font-size: 12px;
+}
+.button {
+  border-radius: 4px;
+  font-size: 11px;
+}
+.stat {
+  border-radius: 5px;
+  background: white;
+  border: 1px solid var(--line);
+}
+.stat-value {
+  font-weight: 850;
+}
+.stat-label {
+  font-size: 10px;
+  color: #9999a2;
+}
+.stat .secondary-text {
+  font-size: 10px;
+}
+.pill {
+  border-radius: 3px;
+  font-size: 9px;
+}
+.pill--green {
+  background: #f1f1f5;
+  color: #666672;
+}
+.pill--clay {
+  background: #fff0f3;
+  color: #dc3c55;
+}
+.queue-item {
+  border-radius: 4px;
+  background: #fafafc;
+  border: 1px solid #eeeef2;
+  padding: 20px;
+}
+.queue-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+.queue-body {
+  font-size: 12px;
+  color: #83838e;
+}
+.queue-meta {
+  font-size: 10px;
+}
+.panel-note {
+  font-size: 11px;
+  line-height: 1.9;
+}
+.action-modal__backdrop {
+  background: #28293477;
+}
+.action-modal__panel {
+  border-radius: 6px;
+  box-shadow: 0 20px 60px #21212c2b;
+}
+.action-modal__message {
+  background: #f7f7f9;
+}
+.brand-name strong {
+  color: var(--green);
+}
+@media (max-width: 960px) {
+  .rail {
+    width: 190px;
+  }
+  .main {
+    margin-left: 190px;
+    padding: 28px;
+  }
+  .columns,
+  .columns.equal {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 680px) {
+  .rail {
+    width: auto;
+    border-bottom: 1px solid var(--line);
+    padding: 12px;
+  }
+  .main {
+    margin-left: 0;
+    padding: 24px 16px 45px;
+  }
+  .brand {
+    padding: 0 0 10px;
+  }
+  .brand-name {
+    font-size: 18px;
+  }
+  .brand-sub {
+    display: none;
+  }
+  .nav button {
+    min-height: 34px;
+    font-size: 10px;
+  }
+  .panel {
+    padding: 20px;
+  }
+  h1 {
+    font-size: 28px;
+  }
+  .rail-bottom {
+    padding: 0;
+    border: 0;
+  }
+  .logout {
+    font-size: 10px;
+  }
+  .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}

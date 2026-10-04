@@ -1,0 +1,241 @@
+{
+  "reviewType": "simulated-browser-review",
+  "date": "2026-10-04",
+  "baselineCommit": "0ca1d63",
+  "environment": "isolated-local-postgresql",
+  "viewports": [
+    "390x844",
+    "1440x1000"
+  ],
+  "researchLimitation": "没有真实用户访谈或生产增长数据；影响与成本为定性模拟判断。",
+  "findings": [
+    {
+      "id": "PM-01",
+      "severity": "P1",
+      "persona": "普通成员：保存未提交的表达",
+      "task": "写作草稿与浏览器后退",
+      "steps": [
+        "首页点击写一笔",
+        "填写未提交正文",
+        "使用浏览器后退",
+        "浏览器前进回到发布页"
+      ],
+      "observed": "没有确认对话框；前进后正文为空。probe-results.json dialogs=[]、body=\"\"。",
+      "expected": "后退时可取消离开；取消后正文、标题、范围与身份完整保留。",
+      "evidence": [
+        "20-write-before-browser-back.png",
+        "21-write-after-browser-forward.png",
+        "probe-results.json#write-browser-back"
+      ],
+      "suggestedFix": "统一覆盖hash历史、内部链接和社团切换的脏表单离开保护；取消时保留当前路由和内存表单。不要持久存储私密正文。",
+      "acceptance": [
+        {
+          "given": "成员发布/重提表单填写未提交正文",
+          "when": "浏览器后退并取消离开",
+          "then": "仍在原编辑页，正文、标题、可见范围和身份不变"
+        },
+        {
+          "given": "相同未提交表单",
+          "when": "确认离开",
+          "then": "才允许导航，并可再次正常浏览历史"
+        },
+        {
+          "given": "有草稿",
+          "when": "点击内部导航或切换社团后取消",
+          "then": "原任务完整保留"
+        }
+      ],
+      "effort": "M：前端历史导航保护，需覆盖取消和重复历史操作"
+    },
+    {
+      "id": "PM-02",
+      "severity": "P1",
+      "persona": "普通成员：只为自己保存文字",
+      "task": "提交私密匿名文章并理解审核结果",
+      "steps": [
+        "发布页选择文章",
+        "选择仅自己与树洞身份",
+        "填唯一pm-review标题正文并提交",
+        "观察详情范围和toast",
+        "删除自己新建测试作品"
+      ],
+      "observed": "详情仅自己可见且已保存，但toast称“已收到，等待审核后展示”。实际协议私密state为private_saved。",
+      "expected": "提示私密内容已保存，且无需审核；社内/公开仍送审。",
+      "evidence": [
+        "26-private-composer.png",
+        "27-private-result.png",
+        "probe-results.json#private-publish",
+        "probe-results.json#private-cleanup"
+      ],
+      "suggestedFix": "识别既有private_saved状态，反馈“仅自己可见，已保存”；不改后端权限和审核规则。",
+      "acceptance": [
+        {
+          "given": "可发布成员选择仅自己",
+          "when": "提交成功",
+          "then": "显示保存成功与仅自己范围，不显示等待审核，也不扩大可见性"
+        },
+        {
+          "given": "社内或公开表达",
+          "when": "提交成功",
+          "then": "保留等待审核反馈，未审核内容不提前进入普通成员信息流"
+        }
+      ],
+      "effort": "S：成功状态文案映射"
+    },
+    {
+      "id": "PM-03",
+      "severity": "P2",
+      "persona": "新读者：完成当前社团加入；成员：打开收藏",
+      "task": "登录或注册后继续原任务",
+      "steps": [
+        "无cookie首访并选黑光文学社",
+        "打开加入页",
+        "点击登录，使用非成员账号",
+        "观察成功后路由",
+        "另以无cookie上下文请求收藏页并登录普通成员"
+      ],
+      "observed": "两条路径认证后都到#/home，未回加入或收藏。加入用户需再次找到加入入口。",
+      "expected": "同一社团与安全站内任务在登录/注册后续接。",
+      "evidence": [
+        "32-guest-join.png",
+        "33-visitor-login-lost-join.png",
+        "19-login-lost-task.png",
+        "join-admin-results.json#guest-join-login",
+        "probe-results.json#protected-after-login"
+      ],
+      "suggestedFix": "携带受校验站内返回目标和社团上下文；切换登录/注册仍保留；直接登录保留默认落点。",
+      "acceptance": [
+        {
+          "given": "访客正在某社团加入页",
+          "when": "登录或注册成功",
+          "then": "回同社团加入页，仍受原成员资格限制"
+        },
+        {
+          "given": "成员收藏任务被要求登录",
+          "when": "登录成功",
+          "then": "回收藏页"
+        },
+        {
+          "given": "直接登录或目标为外站/非法路由",
+          "when": "登录成功",
+          "then": "使用安全默认页，禁止外站跳转"
+        }
+      ],
+      "effort": "M：安全返回路由与认证续接"
+    },
+    {
+      "id": "PM-04",
+      "severity": "P2",
+      "persona": "新读者：了解隐私后注册",
+      "task": "填写注册信息并阅读必需隐私说明",
+      "steps": [
+        "注册页填账号、昵称、两次密码",
+        "点击协议旁隐私说明",
+        "浏览器返回注册页"
+      ],
+      "observed": "账号、昵称、密码、确认密码全部清空。",
+      "expected": "阅读说明后能继续未提交注册，不重复填写，未勾同意仍不可提交。",
+      "evidence": [
+        "17-register-before-privacy.png",
+        "18-register-after-privacy.png",
+        "probe-results.json#register-privacy"
+      ],
+      "suggestedFix": "可关闭说明或页面生命周期内临时状态保存表单；密码不得进入localStorage或持久化。",
+      "acceptance": [
+        {
+          "given": "未提交注册表单已填写",
+          "when": "阅读隐私说明并关闭或返回",
+          "then": "账号昵称和可继续提交的输入仍在"
+        },
+        {
+          "given": "未勾选同意",
+          "when": "尝试提交",
+          "then": "不能创建账户"
+        },
+        {
+          "given": "密码曾填写",
+          "when": "检查localStorage/sessionStorage",
+          "then": "没有持久化密码"
+        }
+      ],
+      "effort": "S：说明打开方式或临时表单恢复"
+    },
+    {
+      "id": "PM-05",
+      "severity": "P2",
+      "persona": "普通成员：从消息或收藏继续阅读",
+      "task": "读完作品后返回来源列表",
+      "steps": [
+        "消息列表点击查看，进入作品",
+        "点击作品页面返回链接",
+        "收藏页打开作品",
+        "观察页面返回链接"
+      ],
+      "observed": "所有详情返回均为“回到树洞”且href=#/home，丢失消息/收藏来源。手机与桌面相同。",
+      "expected": "从消息或收藏进入时返回该列表及标签；直接打开作品默认回树洞。",
+      "evidence": [
+        "23-message-detail-return.png",
+        "24-bookmark-detail-return.png",
+        "30-bookmark-return-desktop.png",
+        "probe-results.json#notification-back"
+      ],
+      "suggestedFix": "作品导航保留安全站内来源，详情返回标签对应消息/收藏，直达时默认首页。",
+      "acceptance": [
+        {
+          "given": "从消息某标签或收藏页打开作品",
+          "when": "点击页面返回",
+          "then": "回原来源页和标签"
+        },
+        {
+          "given": "直接打开作品详情",
+          "when": "点击页面返回",
+          "then": "回树洞"
+        },
+        {
+          "given": "来源目标为外站或脚本协议",
+          "when": "详情渲染返回链接",
+          "then": "拒绝目标并使用安全站内默认"
+        }
+      ],
+      "effort": "S：来源路由与返回链接"
+    },
+    {
+      "id": "PM-06",
+      "severity": "P2",
+      "persona": "普通成员：改为对全文回应",
+      "task": "取消某条回应的回复目标并保留正文",
+      "steps": [
+        "打开有一级回应的短笔详情",
+        "点击某条回应按钮",
+        "填正文",
+        "查找取消回复目标入口"
+      ],
+      "observed": "提示“正在回应 木白（清空页面可取消）”；没有取消目标控件。",
+      "expected": "一步取消目标，正文和匿名选择保持，随后发送为作品一级回应。",
+      "evidence": [
+        "22-reply-target-no-cancel.png",
+        "31-reply-target-desktop.png",
+        "probe-results.json#reply-target"
+      ],
+      "suggestedFix": "在目标提示旁加入取消回应目标操作，仅清除replyToId和目标提示，保留正文与身份。",
+      "acceptance": [
+        {
+          "given": "已选一级回应，写有正文并选择匿名",
+          "when": "取消回应目标",
+          "then": "replyToId与目标提示清空，正文和匿名选择不变"
+        },
+        {
+          "given": "已取消目标",
+          "when": "提交回应",
+          "then": "提交为作品一级回应，仍按原审核规则"
+        },
+        {
+          "given": "已有正文",
+          "when": "选择另一条回应作为目标",
+          "then": "正文仍保留且目标正确切换"
+        }
+      ],
+      "effort": "S：取消目标控件与轻量状态更新"
+    }
+  ]
+}

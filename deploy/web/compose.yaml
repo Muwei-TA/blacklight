@@ -1,0 +1,67 @@
+name: blacklight-web
+services:
+  db:
+    build:
+      context: ../..
+      dockerfile: deploy/web/Dockerfile.pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: blacklight
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U postgres -d blacklight']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [private]
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/nas/Dockerfile.app
+    restart: unless-stopped
+    environment: &runtime
+      NODE_ENV: production
+      RUNTIME_KIND: nas
+      REVIEW_PROVIDER: manual
+      DATABASE_URL: postgresql://blacklight_app:${POSTGRES_APP_PASSWORD}@db:5432/blacklight
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:?Set your HTTPS website URL}
+      ANON_ALIAS_SECRET: ${ANON_ALIAS_SECRET:?Set ANON_ALIAS_SECRET}
+      MEDIA_URL_SECRET: ${MEDIA_URL_SECRET:?Set MEDIA_URL_SECRET}
+      WEB_TRUSTED_PROXY_IPS: ${WEB_TRUSTED_PROXY_IPS:-172.28.42.1}
+      WEB_REGISTRATION: ${WEB_REGISTRATION:-open}
+      NAS_MEDIA_DIR: /data/private-media
+      PORT: '3000'
+    volumes:
+      - private-media:/data/private-media
+    ports:
+      - '${WEB_BIND_IP:-127.0.0.1}:${WEB_PORT:-3000}:3000'
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [private, edge]
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/nas/Dockerfile.app
+    restart: unless-stopped
+    command: ['npm', 'run', 'worker']
+    environment: *runtime
+    volumes:
+      - private-media:/data/private-media
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [private]
+volumes:
+  postgres-data:
+  private-media:
+networks:
+  private:
+    internal: true
+  edge:
+    ipam:
+      config:
+        - subnet: ${WEB_NETWORK_SUBNET:-172.28.42.0/24}
+          gateway: ${WEB_PROXY_GATEWAY:-172.28.42.1}

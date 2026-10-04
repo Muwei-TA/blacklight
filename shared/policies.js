@@ -321,6 +321,8 @@ function computePostViewerFlags(viewer, post, { reacted = false, bookmarked = fa
     reacted,
     bookmarked,
     canComment: canComment(viewer, post),
+    canReact: canInteract(viewer, post),
+    canBookmark: canInteract(viewer, post),
     isOwner: owner,
     canManage: owner,
     canShrinkVisibility: owner && VISIBILITY_RANK[post.visibility] > VISIBILITY_RANK[VISIBILITY.PRIVATE],

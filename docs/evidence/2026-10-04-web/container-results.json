@@ -1,0 +1,12 @@
+{
+  "checks": [
+    "Container serves member website under ordinary node UID",
+    "Container serves existing admin console",
+    "Registration succeeds with Secure HttpOnly cookies and no token JSON",
+    "Fresh PostgreSQL volume initializes all 27 checksum-ledger migrations",
+    "Real host-to-Docker proxy path resolves distinct configured forwarded peers",
+    "Fresh account authenticates through PostgreSQL",
+    "Worker starts without database or cleanup errors"
+  ],
+  "date": "2026-10-04T03:06:27.921Z"
+}

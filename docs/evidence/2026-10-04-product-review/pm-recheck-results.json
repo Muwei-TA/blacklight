@@ -1,0 +1,475 @@
+{
+  "reviewType": "independent-simulated-browser-recheck",
+  "date": "2026-10-04T04:34:55.745Z",
+  "viewports": [
+    "390x844",
+    "1440x1000"
+  ],
+  "checks": [
+    {
+      "id": "PM-01",
+      "name": "mobile 历史后退与前进取消、再次导航、内部链接",
+      "status": "pass",
+      "details": {
+        "before": {
+          "title": "pm-review 历史保护",
+          "body": "pm-review 未提交正文，取消离开后应完整保留。",
+          "visibility": "private",
+          "identityMode": "anonymous",
+          "kind": "article"
+        },
+        "afterCancel": {
+          "title": "pm-review 历史保护",
+          "body": "pm-review 未提交正文，取消离开后应完整保留。",
+          "visibility": "private",
+          "identityMode": "anonymous",
+          "kind": "article"
+        },
+        "dialogCount": 3,
+        "confirmedNavigation": "clubs",
+        "overflow": {
+          "width": 390,
+          "scroll": 390,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-01",
+      "name": "mobile 社团切换取消边界",
+      "status": "pass",
+      "details": {
+        "availableClubs": [
+          {
+            "value": "browser-heiguang",
+            "text": "黑光文学社"
+          }
+        ],
+        "note": "单社团隔离夹具；取消分支通过浏览器内临时option触发，不声称完成真实第二社团切换。"
+      }
+    },
+    {
+      "id": "PM-02",
+      "name": "mobile 私密保存反馈与清理",
+      "status": "pass",
+      "details": {
+        "url": "http://127.0.0.1:3000/#/post/b9530863-4ab5-4045-bb1a-7500e84584b3",
+        "toast": "已保存，仅自己可见",
+        "scope": "仅自己可见",
+        "cleanup": "作品已删除",
+        "overflow": {
+          "width": 390,
+          "scroll": 390,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-05",
+      "name": "mobile 消息与收藏返回来源及直达默认",
+      "status": "pass",
+      "details": {
+        "records": [
+          {
+            "source": "/#/messages/reply",
+            "back": "#/messages/reply",
+            "label": "← 回到消息",
+            "result": "#/messages/reply"
+          },
+          {
+            "source": "/#/contents/bookmark",
+            "back": "#/contents/bookmark",
+            "label": "← 回到收藏",
+            "result": "#/contents/bookmark"
+          },
+          {
+            "direct": "browser-post2",
+            "back": "#/home"
+          }
+        ],
+        "invalidBack": "home",
+        "overflow": {
+          "width": 390,
+          "scroll": 390,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-06",
+      "name": "mobile 取消回复保留正文与匿名选择",
+      "status": "pass",
+      "details": {
+        "rootReplyTargets": 1,
+        "firstTarget": "screenshot-comment",
+        "switchedTargets": [],
+        "note": "只有一个真实一级回应；验证取消后重选同对象，未伪称不同对象切换。",
+        "overflow": {
+          "width": 390,
+          "scroll": 390,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "regression",
+      "name": "mobile 退回作品重提入口与匿名边界",
+      "status": "pass",
+      "details": {
+        "title": "一段还在修改的文字",
+        "bodyPrefilled": true,
+        "anonymousProfileLinks": 0,
+        "overflow": {
+          "width": 390,
+          "scroll": 390,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-04",
+      "name": "mobile 阅读隐私保留注册输入并强制同意",
+      "status": "pass",
+      "details": {
+        "newTab": true,
+        "usernameRetained": true,
+        "nicknameRetained": true,
+        "passwordRetainedInLiveForm": true,
+        "agreementRequired": true,
+        "actualRegisterSubmissions": 0,
+        "storage": {
+          "local": {},
+          "session": {}
+        },
+        "overflow": {
+          "width": 390,
+          "scroll": 390,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-03",
+      "name": "mobile 加入任务登录/注册切换后续接",
+      "status": "pass",
+      "details": {
+        "loginHash": "#/login?next=%23%2Fjoin",
+        "registerHash": "#/register?next=%23%2Fjoin",
+        "result": "#/join",
+        "club": "browser-heiguang",
+        "overflow": {
+          "width": 390,
+          "scroll": 390,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-03",
+      "name": "mobile 收藏任务认证续接",
+      "status": "pass",
+      "details": {
+        "result": "#/contents/bookmark",
+        "overflow": {
+          "width": 390,
+          "scroll": 390,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-03",
+      "name": "mobile 非法next默认落点",
+      "status": "pass",
+      "details": {
+        "result": "#/home",
+        "origin": "http://127.0.0.1:3000",
+        "overflow": {
+          "width": 390,
+          "scroll": 390,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "regression",
+      "name": "mobile 管理入口、审核队列与取消",
+      "status": "pass",
+      "details": {
+        "queueItems": 4,
+        "decisionSubmitted": false,
+        "overflow": {
+          "width": 390,
+          "scroll": 390,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-01",
+      "name": "desktop 历史后退与前进取消、再次导航、内部链接",
+      "status": "pass",
+      "details": {
+        "before": {
+          "title": "pm-review 历史保护",
+          "body": "pm-review 未提交正文，取消离开后应完整保留。",
+          "visibility": "private",
+          "identityMode": "anonymous",
+          "kind": "article"
+        },
+        "afterCancel": {
+          "title": "pm-review 历史保护",
+          "body": "pm-review 未提交正文，取消离开后应完整保留。",
+          "visibility": "private",
+          "identityMode": "anonymous",
+          "kind": "article"
+        },
+        "dialogCount": 3,
+        "confirmedNavigation": "clubs",
+        "overflow": {
+          "width": 1440,
+          "scroll": 1440,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-01",
+      "name": "desktop 社团切换取消边界",
+      "status": "pass",
+      "details": {
+        "availableClubs": [
+          {
+            "value": "browser-heiguang",
+            "text": "黑光文学社"
+          }
+        ],
+        "note": "单社团隔离夹具；取消分支通过浏览器内临时option触发，不声称完成真实第二社团切换。"
+      }
+    },
+    {
+      "id": "PM-02",
+      "name": "desktop 私密保存反馈与清理",
+      "status": "pass",
+      "details": {
+        "url": "http://127.0.0.1:3000/#/post/b5662f44-ecdc-43fa-94b9-476a9565b1fa",
+        "toast": "已保存，仅自己可见",
+        "scope": "仅自己可见",
+        "cleanup": "作品已删除",
+        "overflow": {
+          "width": 1440,
+          "scroll": 1440,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-05",
+      "name": "desktop 消息与收藏返回来源及直达默认",
+      "status": "pass",
+      "details": {
+        "records": [
+          {
+            "source": "/#/messages/reply",
+            "back": "#/messages/reply",
+            "label": "← 回到消息",
+            "result": "#/messages/reply"
+          },
+          {
+            "source": "/#/contents/bookmark",
+            "back": "#/contents/bookmark",
+            "label": "← 回到收藏",
+            "result": "#/contents/bookmark"
+          },
+          {
+            "direct": "browser-post2",
+            "back": "#/home"
+          }
+        ],
+        "invalidBack": "home",
+        "overflow": {
+          "width": 1440,
+          "scroll": 1440,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-06",
+      "name": "desktop 取消回复保留正文与匿名选择",
+      "status": "pass",
+      "details": {
+        "rootReplyTargets": 1,
+        "firstTarget": "screenshot-comment",
+        "switchedTargets": [],
+        "note": "只有一个真实一级回应；验证取消后重选同对象，未伪称不同对象切换。",
+        "overflow": {
+          "width": 1440,
+          "scroll": 1440,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "regression",
+      "name": "desktop 退回作品重提入口与匿名边界",
+      "status": "pass",
+      "details": {
+        "title": "一段还在修改的文字",
+        "bodyPrefilled": true,
+        "anonymousProfileLinks": 0,
+        "overflow": {
+          "width": 1440,
+          "scroll": 1440,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-04",
+      "name": "desktop 阅读隐私保留注册输入并强制同意",
+      "status": "pass",
+      "details": {
+        "newTab": true,
+        "usernameRetained": true,
+        "nicknameRetained": true,
+        "passwordRetainedInLiveForm": true,
+        "agreementRequired": true,
+        "actualRegisterSubmissions": 0,
+        "storage": {
+          "local": {},
+          "session": {}
+        },
+        "overflow": {
+          "width": 1440,
+          "scroll": 1440,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-03",
+      "name": "desktop 加入任务登录/注册切换后续接",
+      "status": "pass",
+      "details": {
+        "loginHash": "#/login?next=%23%2Fjoin",
+        "registerHash": "#/register?next=%23%2Fjoin",
+        "result": "#/join",
+        "club": "browser-heiguang",
+        "overflow": {
+          "width": 1440,
+          "scroll": 1440,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-03",
+      "name": "desktop 收藏任务认证续接",
+      "status": "pass",
+      "details": {
+        "result": "#/contents/bookmark",
+        "overflow": {
+          "width": 1440,
+          "scroll": 1440,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-03",
+      "name": "desktop 非法next默认落点",
+      "status": "pass",
+      "details": {
+        "result": "#/home",
+        "origin": "http://127.0.0.1:3000",
+        "overflow": {
+          "width": 1440,
+          "scroll": 1440,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "regression",
+      "name": "desktop 管理入口、审核队列与取消",
+      "status": "pass",
+      "details": {
+        "queueItems": 4,
+        "decisionSubmitted": false,
+        "overflow": {
+          "width": 1440,
+          "scroll": 1440,
+          "pass": true
+        }
+      }
+    },
+    {
+      "id": "PM-04",
+      "name": "mobile 未勾选同意的真实注册网络提交阻止",
+      "status": "pass",
+      "details": {
+        "observedEndpoint": "/v1/web/auth/register",
+        "postRequests": 0,
+        "nativeValidationMissingAgreement": true,
+        "createdAccount": false
+      }
+    },
+    {
+      "id": "PM-04",
+      "name": "desktop 未勾选同意的真实注册网络提交阻止",
+      "status": "pass",
+      "details": {
+        "observedEndpoint": "/v1/web/auth/register",
+        "postRequests": 0,
+        "nativeValidationMissingAgreement": true,
+        "createdAccount": false
+      }
+    }
+  ],
+  "errors": [],
+  "screens": [
+    "mobile-01-draft-before.png",
+    "mobile-02-draft-after-cancel.png",
+    "mobile-03-forward-cancel.png",
+    "mobile-04-club-cancel.png",
+    "mobile-05-private-saved.png",
+    "mobile-06-message-return.png",
+    "mobile-07-bookmark-return.png",
+    "mobile-08-cancel-reply.png",
+    "mobile-09-resubmit.png",
+    "mobile-10-privacy-new-tab.png",
+    "mobile-11-register-retained.png",
+    "mobile-12-join-continued.png",
+    "mobile-13-bookmark-login.png",
+    "mobile-14-invalid-next.png",
+    "mobile-15-admin-cancel.png",
+    "mobile-16-admin-queue.png",
+    "desktop-01-draft-before.png",
+    "desktop-02-draft-after-cancel.png",
+    "desktop-03-forward-cancel.png",
+    "desktop-04-club-cancel.png",
+    "desktop-05-private-saved.png",
+    "desktop-06-message-return.png",
+    "desktop-07-bookmark-return.png",
+    "desktop-08-cancel-reply.png",
+    "desktop-09-resubmit.png",
+    "desktop-10-privacy-new-tab.png",
+    "desktop-11-register-retained.png",
+    "desktop-12-join-continued.png",
+    "desktop-13-bookmark-login.png",
+    "desktop-14-invalid-next.png",
+    "desktop-15-admin-cancel.png",
+    "desktop-16-admin-queue.png"
+  ],
+  "summary": {
+    "passed": 24,
+    "failed": 0
+  },
+  "coverageLimitations": [
+    "仅一个真实社团；切换取消分支使用浏览器临时option，不是成功加入第二社团。",
+    "仅一条真实一级回应；取消与重选同对象已验证，不同一级回应间实际切换未测。",
+    "没有真实创建新注册账号；注册/登录切换保留next与登录后的续接已验证。",
+    "没有提交社内/公开内容或管理决定；既有送审流程不作为本轮新增写入验收。"
+  ]
+}
