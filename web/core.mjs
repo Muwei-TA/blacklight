@@ -14,6 +14,13 @@ export function createScope() {
   let club = '';
   return { begin(clubId) { club = clubId; sequence += 1; return { sequence, club }; }, current(token) { return token?.sequence === sequence && token?.club === club; } };
 }
+export function shouldClearSelectedClubPreference(error, requestedClubId, currentClubId) {
+  return !!requestedClubId && requestedClubId === currentClubId
+    && (
+      (error?.status === 403 && ['membership_invalid', 'forbidden'].includes(error.code))
+      || (error?.status === 404 && error.code === 'not_accessible')
+    );
+}
 export function idempotencyKey(draft, payload) {
   const fingerprint = JSON.stringify(payload);
   if (draft.fingerprint !== fingerprint) { draft.fingerprint = fingerprint; draft.key = crypto.randomUUID(); }

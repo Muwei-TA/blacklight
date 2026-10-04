@@ -1,5 +1,5 @@
 import { createApi } from './api.mjs';
-import { createScope, itemsOf, routeUrl, mergeCommentPages, collectPages } from './core.mjs';
+import { createScope, itemsOf, routeUrl, mergeCommentPages, collectPages, shouldClearSelectedClubPreference } from './core.mjs';
 import { shell } from './views.mjs';
 import { createFlows } from './flows.mjs';
 
@@ -59,13 +59,32 @@ async function refreshAccount() {
   const account = await api.session();
   const clubs = account.authenticated ? await api.action('clubs/mine', '') : { list: [] };
   const selectedClub = requestedClub || itemsOf(clubs).find((club) => club.status === 'active')?.id || '';
-  const session = selectedClub ? await api.action('session/me', selectedClub) : null;
-  if (token && !scope.current(token)) return;
-  if (state.clubId !== requestedClub) return;
+  let session = null;
+  if (selectedClub) {
+    try {
+      session = await api.action('session/me', selectedClub);
+    } catch (error) {
+      if (shouldClearSelectedClubPreference(error, requestedClub, state.clubId)
+        && (!token || scope.current(token))) {
+        try { localStorage.removeItem('blacklight.selectedClub'); } catch { /* storage may be disabled */ }
+        state.account = account;
+        state.clubs = clubs;
+        state.clubId = '';
+        state.session = null;
+        state.page = null;
+        state.unread = 0;
+        return { invalidSelectedClub: true };
+      }
+      throw error;
+    }
+  }
+  if (token && !scope.current(token)) return { invalidSelectedClub: false };
+  if (state.clubId !== requestedClub) return { invalidSelectedClub: false };
   state.account = account;
   state.clubs = clubs;
   state.clubId = selectedClub;
   state.session = session;
+  return { invalidSelectedClub: false };
 }
 async function readPage(route, clubId, session, cursor = '', isCurrent = () => true) {
   const action = (name, payload = {}) => api.action(name, clubId, { ...payload, ...(cursor ? { cursor } : {}) });
@@ -232,7 +251,10 @@ window.addEventListener('hashchange', () => {
 });
 async function boot() {
   try { state.clubId = localStorage.getItem('blacklight.selectedClub') || ''; } catch { /* optional preference */ }
-  try { await refreshAccount(); }
+  try {
+    const refreshed = await refreshAccount();
+    if (refreshed?.invalidSelectedClub) { navigate('clubs'); return; }
+  }
   catch (error) { state.error = error.message; state.loading = false; state.route = parseRoute(); render(); return; }
   if (!location.hash && state.clubId) navigate('home');
   else await loadRoute();

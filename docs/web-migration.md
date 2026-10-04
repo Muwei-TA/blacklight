@@ -60,13 +60,14 @@ PostgreSQL 和 worker 只接内部网络；API 同时连接接入网络，默认
 
 ## 已有 NAS 数据库：增量升级
 
-先备份数据库和私有媒体，再更新代码与同步 shared。新增迁移是：
+先备份数据库和私有媒体，再更新代码与同步 shared。新增迁移有：
 
-`cloudbase/migrations/20261004090000_web_accounts.sql`
+- `cloudbase/migrations/20261004090000_web_accounts.sql` 新增网站账号、会话和限频表。
+- `cloudbase/migrations/20261004100000_fix_platform_club_advisory_lock.sql` 修复平台创建社团时的 advisory lock 键表达式，不修改既有数据。
 
-它新增 `hg_web_accounts`、`hg_web_sessions`、`hg_web_auth_limits`，不改写既有用户、成员资格或作品。数据库登录角色必须有 `service_role` 权限，普通客户端角色没有新表权限。
+两项迁移均不改写既有用户、成员资格或作品。数据库登录角色必须有 `service_role` 权限，普通客户端角色没有新表权限。
 
-现有 NAS 的 `scripts/local-apply-migrations.sh` 现验证 27 个迁移；`scripts/local-migration-lib.mjs` 的 inventory 为 36 个源表。建议使用现有部署的迁移命令和校验账本，在数据库容器中设置 `LOCAL_MIGRATIONS_DIR`、`LOCAL_COMPAT_DIR`、`NAS_APP_DATABASE_PASSWORD_FILE`、`POSTGRES_USER`、`POSTGRES_DB` 后执行脚本。它会跳过已有且 checksum 一致的迁移，并在事务中执行新迁移和登记账本。
+现有 NAS 的 `scripts/local-apply-migrations.sh` 现验证 28 个迁移；最新文件为 `20261004100000_fix_platform_club_advisory_lock.sql`，`scripts/local-migration-lib.mjs` 的 inventory 为 36 个源表。建议使用现有部署的迁移命令和校验账本，在数据库容器中设置 `LOCAL_MIGRATIONS_DIR`、`LOCAL_COMPAT_DIR`、`NAS_APP_DATABASE_PASSWORD_FILE`、`POSTGRES_USER`、`POSTGRES_DB` 后执行脚本。它会跳过已有且 checksum 一致的迁移，并在事务中执行新迁移和登记账本。
 
 只用 `psql -f` 执行新 SQL 不会自动更新 NAS 的 `nas_meta.schema_migrations`，NAS 健康检查仍会失败。不要编辑旧迁移绕过 checksum。网站 Compose 的初始化也复用同一迁移脚本与账本。
 
@@ -106,7 +107,7 @@ node scripts/local-web-account.mjs --user-id EXISTING_USER_ID --username reader_
 
 ## 备份与会话清理
 
-同时备份 PostgreSQL 与私有媒体。包含网站凭据的数据库备份属于私密运维资料，不得放在公开下载目录。原 NAS 备份脚本的迁移数量也已更新为 27。网站 Compose 可停 API 和 worker 后，在 DB 容器运行 `pg_dump`，并保存 private-media volume；恢复到独立数据库后验证迁移账本和媒体清单。不要删除现有数据卷来“重跑初始化”。worker 每日清理过期/撤销的网站会话与旧限频桶。
+同时备份 PostgreSQL 与私有媒体。包含网站凭据的数据库备份属于私密运维资料，不得放在公开下载目录。原 NAS 备份脚本的迁移数量也已更新为 28。网站 Compose 可停 API 和 worker 后，在 DB 容器运行 `pg_dump`，并保存 private-media volume；恢复到独立数据库后验证迁移账本和媒体清单。不要删除现有数据卷来“重跑初始化”。worker 每日清理过期/撤销的网站会话与旧限频桶。
 
 ## 自动验证
 

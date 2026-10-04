@@ -69,9 +69,10 @@ export function createFlows({ state, api, navigate, refreshAccount, loadRoute, s
         const continuation = parseInternalRoute(state.route.query?.next);
         await api.auth(name, values);
         form.reset();
-        await refreshAccount();
+        const refreshed = await refreshAccount();
         if (isCurrent(token)) {
-          if (continuation) navigate(continuation.name, continuation.id, continuation.query);
+          if (refreshed?.invalidSelectedClub) navigate('clubs');
+          else if (continuation) navigate(continuation.name, continuation.id, continuation.query);
           else navigate(state.clubId ? 'home' : 'clubs');
           toast(name === 'register' ? '账号已创建，欢迎来到灯下' : '欢迎回到灯下');
         }
@@ -83,7 +84,8 @@ export function createFlows({ state, api, navigate, refreshAccount, loadRoute, s
         const input = { displayName: values.displayName, inviteCode: values.inviteCode, rulesVersion: state.page.club.rulesVersion };
         const result = await action('membership/apply', { ...input, idempotencyKey: idempotencyKey(draftFor(form), input) });
         if (result.error) throw new Error('邀请码无效或已过期，请向管理员确认');
-        await refreshAccount();
+        const refreshed = await refreshAccount();
+        if (refreshed?.invalidSelectedClub) { navigate('clubs'); return; }
         if (isCurrent(token)) { navigate(result.state === 'active' || state.session?.memberStatus === 'active' ? 'home' : 'join'); toast('加入请求已提交，请查看成员状态'); }
         return;
       }
@@ -109,7 +111,7 @@ export function createFlows({ state, api, navigate, refreshAccount, loadRoute, s
         return;
       }
       if (name === 'collection-submit') { await action('collections/submit', { id: state.route.id, postId: values.postId, consentVersion: 'v1.0' }); toast('投稿和授权已提交，等待编辑收录'); return; }
-      if (name === 'profile') { await action('me/profile/update', { displayName: values.displayName }); await refreshAccount(); if (isCurrent(token)) { await loadRoute(); toast('昵称已更新'); } return; }
+      if (name === 'profile') { await action('me/profile/update', { displayName: values.displayName }); const refreshed = await refreshAccount(); if (refreshed?.invalidSelectedClub) { navigate('clubs'); return; } if (isCurrent(token)) { await loadRoute(); toast('昵称已更新'); } return; }
       if (name === 'password') { await api.auth('password', values); form.reset(); api.clear(); state.account = null; state.session = null; state.clubs = { list: [] }; navigate('login'); toast('密码已更新，请使用新密码登录'); return; }
     } catch (error) {
       if (!isCurrent(token)) return;
@@ -123,7 +125,7 @@ export function createFlows({ state, api, navigate, refreshAccount, loadRoute, s
     const post = state.page?.post;
     const action = (key, payload = {}) => api.action(key, clubId, payload);
     const command = button.dataset.action;
-    if (command === 'retry') { if (!state.account) { await refreshAccount().catch((error) => toast(error.message)); } await loadRoute(); return; }
+    if (command === 'retry') { if (!state.account) { const refreshed = await refreshAccount().catch((error) => { toast(error.message); return null; }); if (refreshed?.invalidSelectedClub) { navigate('clubs'); return; } } await loadRoute(); return; }
     if (command === 'select-club') { await selectClub(button.dataset.id); return; }
     if (command === 'more' || command === 'more-comments') { await loadMore(command === 'more-comments'); return; }
     if (command === 'reply-to') {
@@ -175,14 +177,15 @@ export function createFlows({ state, api, navigate, refreshAccount, loadRoute, s
         await action('consents/revoke', { postId: post.id });
       } else if (command === 'read-all') { await action('notifications/read-all'); state.unread = 0; }
       else if (command === 'check-in') { const result = await action('me/check-in'); toast(result.alreadyCheckedIn || result.alreadyClaimed ? '今天已经签到过了' : '签到完成，欢迎今天也在灯下'); }
-      else if (command === 'cancel-application') { await action('membership/cancel', { applicationId: button.dataset.id, expectedVersion: Number(button.dataset.version) }); await refreshAccount(); }
+      else if (command === 'cancel-application') { await action('membership/cancel', { applicationId: button.dataset.id, expectedVersion: Number(button.dataset.version) }); const refreshed = await refreshAccount(); if (refreshed?.invalidSelectedClub) { navigate('clubs'); return; } }
       else if (command === 'confirm-governance') {
         const recovery = button.dataset.kind === 'recovery';
         const decision = button.dataset.decision;
         const result = await modal(decision === 'accept' ? '接受这项管理安排？' : '拒绝这项安排？', decision === 'decline' ? reasonField(500, 10) : '', '确认', '请核对团队和期限，决定生效后管理权限可能变化。');
         if (!result || !isCurrent(token)) return;
         await api.action(recovery ? `account/recovery/${decision}` : `admin/handovers/${decision}`, button.dataset.club, { ...(recovery ? { recoveryId: button.dataset.id } : { id: button.dataset.id }), expectedVersion: Number(button.dataset.version), ...result });
-        await refreshAccount();
+        const refreshed = await refreshAccount();
+        if (refreshed?.invalidSelectedClub) { navigate('clubs'); return; }
       } else if (command === 'logout') {
         await api.auth('logout');
         state.account = null; state.session = null; state.clubs = { list: [] }; api.clear();

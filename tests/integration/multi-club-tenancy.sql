@@ -236,10 +236,10 @@ BEGIN
     RAISE EXCEPTION 'administrator bypassed moderator-only invite creation';
   EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'FORBIDDEN' THEN RAISE; END IF; END;
   invite_code:=(public.hg_create_invite(moderator_a,'{"maxUses":1,"ttlSeconds":3600}'::jsonb,'heiguang'))->>'code';
-  BEGIN
-    PERFORM public.hg_apply_membership(new_user,jsonb_build_object('inviteCode',invite_code,'displayName','new','rulesVersion','v1.0'),club_b);
-    RAISE EXCEPTION 'foreign invite admitted user';
-  EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'INVITE_INVALID' THEN RAISE; END IF; END;
+  answer:=public.hg_apply_membership(new_user,jsonb_build_object('inviteCode',invite_code,'displayName','new','rulesVersion','v1.0'),club_b);
+  IF answer->>'state' IS DISTINCT FROM 'rejected' OR answer->>'error' IS DISTINCT FROM 'INVITE_INVALID' THEN
+    RAISE EXCEPTION 'foreign invite was not rejected: %',answer;
+  END IF;
   IF EXISTS(SELECT 1 FROM hg_memberships WHERE doc->>'userId'=new_user AND doc->>'clubId'=club_b) THEN RAISE EXCEPTION 'failed join left B membership'; END IF;
 
   answer:=public.hg_governance('member.role',moderator_a,jsonb_build_object(
