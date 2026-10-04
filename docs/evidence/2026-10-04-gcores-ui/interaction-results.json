@@ -1,0 +1,16 @@
+{
+  "checks": [
+    "Account/password login and authenticated home",
+    "Topbar search returns real permitted posts",
+    "Bookmark toggle persists and restores original state",
+    "Reaction toggle persists and restores original state",
+    "Report dialog opens and cancels",
+    "Publish entry, article constraints, private scope controls",
+    "Actual private article submission and detail display",
+    "Test article deleted through existing confirmation flow",
+    "Core routes at 360, 390, 768, 1024, 1440 px; mobile club and bottom navigation",
+    "Long title/name stress checks"
+  ],
+  "errors": [],
+  "date": "2026-10-04T03:54:46.778Z"
+}
