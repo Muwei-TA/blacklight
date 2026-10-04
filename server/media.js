@@ -59,3 +59,25 @@ async function getAuthorizedMedia({ assetId, token, signature }) {
 }
 
 module.exports = { getAuthorizedMedia, currentPermissionVersion, sameVersion };
+
+async function getWebMedia({ assetId, clubId, draftId, postId, version, identity }) {
+  if (!clubId || Boolean(draftId) === Boolean(postId) || !/^\d+$/.test(String(version))) return null;
+  let ctx;
+  try { ctx = await resolveContext(identity?.openid || null, clubId); } catch (_) { return null; }
+  const asset = await db.findOneById(COLLECTIONS.assets, assetId, clubId);
+  if (!asset) return null;
+  let target;
+  if (draftId) {
+    try { target = await db.getDb().rpc('hg_article_draft', { p_operation: 'get', p_actor: ctx.viewer.userId, p_club_id: clubId, p_input: { id: draftId } }); } catch (_) { return null; }
+  } else target = await db.findOneById(COLLECTIONS.posts, postId, clubId);
+  let reviewReady = false;
+  if (target?.status === 'pending' && ctx.viewer.isAdmin && target.ownerId !== ctx.viewer.userId) {
+    const tasks = await db.coll(COLLECTIONS.reviewTasks, clubId).where({ clubId, targetType: 'post', targetId: target._id, postVersion: target.version, status: 'manual' }).limit(1).get();
+    reviewReady = tasks.data.length > 0;
+  }
+  if (!policies.canReadRichAsset(ctx.viewer, asset, target, { draft: !!draftId, version, reviewReady })) return null;
+  const downloaded = await db.getStorage().downloadFile({ fileID: asset.fileId });
+  if (!Buffer.isBuffer(downloaded?.fileContent)) return null;
+  return { content: downloaded.fileContent, contentType: 'image/jpeg' };
+}
+module.exports.getWebMedia = getWebMedia;

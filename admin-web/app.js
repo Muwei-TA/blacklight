@@ -14,6 +14,7 @@
     logoutFailureView,
     clearExpiredSessionState,
   } = globalThis.AdminCore;
+  const { isRichReviewItem, contentDetailPayload, isCurrentRichReviewDetail } = globalThis.AdminContentReview;
   const api = globalThis.AdminApi.createAdminApi();
   const root = document.getElementById('app');
   const scope = createClubRequestScope('');
@@ -34,9 +35,11 @@
     pairingError: '',
     oneTimeCode: '',
     oneTimeInvite: null,
+    reviewPreview: null,
   };
   let pairingGeneration = 0;
   let pairingTimer = null;
+  let reviewPreviewGeneration = 0;
   let codePresenter = createOneTimeCodePresenter();
 
   const PAGE_COPY = {
@@ -191,7 +194,7 @@
         <header class="topline"><div class="topline-copy"><div class="eyebrow">${h(state.view.toUpperCase())} / COMMUNITY</div><h1>${h(copy[0])}</h1><p class="lede">${h(copy[1])}</p></div>${renderClubControl()}</header>
         ${loading}<section class="content">${body}</section>
       </main>
-    </div>`;
+    </div>${renderReviewPreview()}`;
   }
 
   function renderWorkspace(data) {
@@ -247,14 +250,72 @@
     const queue = item.queue || item.type;
     const text = item.summary || item.excerpt || item.content || item.body || item.reason || '';
     const actions = reviewActionsFor(item);
+    const richReview = isRichReviewItem(item);
     const label = queue === 'content' && item.kind === 'article' ? '文章' : queue === 'content' ? '帖子复核' : queueLabel(queue);
     return `<article class="queue-item">
       <div class="queue-top"><span class="pill pill--clay">${h(label)}</span><span class="queue-meta">${h(dateText(item.submittedAt))}</span></div>
-      <div class="queue-title">${h(item.title || item.displayName || item.subject || item.reason || '待处理事项')}</div>
+      <div class="queue-title">${richReview
+        ? `<button class="queue-title__button" data-review-preview="${h(item.id)}">${h(item.title || '无标题文章')}</button>`
+        : h(item.title || item.displayName || item.subject || item.reason || '待处理事项')}</div>
       ${text ? `<div class="queue-body">${h(text)}</div>` : ''}
       <div class="queue-meta">${item.displayName ? `提交者 ${h(item.displayName)} · ` : ''}版本 ${h(item.version === undefined ? '—' : item.version)}</div>
-      ${actions.length ? `<div class="button-row">${actions.map((action) => `<button class="button button--small ${/reject|remove|archive/i.test(action.key || '') ? 'button--danger' : ''}" data-review-key="${h(action.key)}" data-queue="${h(queue)}" data-id="${h(item.id)}">${h(action.label || action.key)}</button>`).join('')}</div>` : `<div class="secondary-text">没有可执行的处理动作。</div>`}
+      ${richReview ? `<div class="button-row"><button class="button button--primary button--small" data-review-preview="${h(item.id)}">阅读全文后审核</button></div>`
+        : actions.length ? `<div class="button-row">${actions.map((action) => `<button class="button button--small ${/reject|remove|archive/i.test(action.key || '') ? 'button--danger' : ''}" data-review-key="${h(action.key)}" data-queue="${h(queue)}" data-id="${h(item.id)}">${h(action.label || action.key)}</button>`).join('')}</div>`
+          : `<div class="secondary-text">没有可执行的处理动作。</div>`}
     </article>`;
+  }
+
+  function reviewPreviewImageUrl(url) {
+    return globalThis.AdminRichDoc.authorizedMediaUrl(url, window.location.origin);
+  }
+
+  function readableReviewAssets(detail) {
+    const assets = Array.isArray(detail.assets) ? detail.assets : [];
+    const byId = new Map(assets.filter((asset) => asset && typeof asset.assetId === 'string').map((asset) => [asset.assetId, asset]));
+    const assetIds = Array.isArray(detail.assetIds) ? detail.assetIds : [];
+    if (!Array.isArray(detail.assets) || !Array.isArray(detail.assetIds)) return false;
+    return assetIds.every((assetId) => reviewPreviewImageUrl(byId.get(assetId)?.url));
+  }
+
+  function renderReviewPreview() {
+    const preview = state.reviewPreview;
+    if (!preview) return '';
+    const item = preview.item;
+    const close = '<button class="button button--small" data-review-preview-close aria-label="关闭全文预览">关闭</button>';
+    let content = '';
+    if (preview.loading) {
+      content = '<div class="loading">正在读取当前版本的完整文章…</div>';
+    } else if (preview.error) {
+      content = `<div class="alert alert--error" role="alert">${h(preview.error)}</div>
+        <div class="button-row review-preview__error-actions">
+          ${preview.stale ? '<button class="button button--primary" data-action="review-preview-refresh">刷新审核队列</button>' : '<button class="button button--primary" data-action="review-preview-retry">重试读取</button>'}
+          <button class="button" data-review-preview-close>关闭</button>
+        </div>`;
+    } else if (preview.detail) {
+      const detail = preview.detail;
+      const assets = Array.isArray(detail.assets) ? detail.assets : [];
+      const cover = assets.find((asset) => asset.assetId === detail.coverAssetId);
+      const coverUrl = cover ? reviewPreviewImageUrl(cover.url) : '';
+      const visibility = detail.visibility === 'club' ? '社内可见' : detail.visibility === 'public' ? '公开可见' : '范围未确认';
+      const articleHtml = globalThis.AdminRichDoc.renderRichDoc(detail.richDoc, assets, window.location.origin);
+      const actions = reviewActionsFor(item);
+      const reviewButtons = actions.map((action) => `<button class="button button--small ${/reject|remove|archive/i.test(action.key || '') ? 'button--danger' : ''}" data-review-key="${h(action.key)}" data-queue="content" data-id="${h(item.id)}">${h(action.label || action.key)}</button>`).join('');
+      content = `<div class="review-preview__meta"><span class="pill pill--green">${h(visibility)}</span><span class="queue-meta">审核版本 ${h(detail.version)}</span></div>
+        <article class="review-preview__article">
+          <h2>${h(detail.title || '无标题文章')}</h2>
+          <p class="review-preview__summary">${detail.summary ? h(detail.summary) : '<span class="secondary-text">暂无摘要</span>'}</p>
+          ${coverUrl ? `<figure class="review-preview__cover"><img src="${h(coverUrl)}" alt="${h(detail.title || '文章封面')}" loading="lazy"></figure>` : ''}
+          <div class="review-preview__body">${articleHtml}</div>
+        </article>
+        <div class="review-preview__decision"><div class="notice">请先核对以上标题、摘要、封面和全文。提交决定时会再次按版本校验。</div><div class="button-row">${reviewButtons}</div></div>`;
+    }
+    return `<div class="review-preview" role="presentation">
+      <button class="review-preview__backdrop" data-review-preview-close aria-label="关闭全文预览"></button>
+      <section class="review-preview__panel" role="dialog" aria-modal="true" aria-labelledby="review-preview-heading">
+        <header class="review-preview__header"><div><div class="eyebrow">CONTENT REVIEW</div><h2 id="review-preview-heading">文章全文预览</h2></div>${close}</header>
+        ${content}
+      </section>
+    </div>`;
   }
 
   function filterButtons(items, selected, kind) {
@@ -520,6 +581,7 @@
     const allowed = clubs.find((club) => (club.id || club.clubId) === clubId);
     if (!allowed) return;
     clearOneTimeCode();
+    clearReviewPreview();
     state.clubId = clubId;
     scope.setClub(clubId);
     state.dataByView = {};
@@ -534,6 +596,7 @@
   function setView(view) {
     if (view === state.view || !canSeeWorkspace(view, state.session, state.clubId)) return;
     clearOneTimeCode();
+    clearReviewPreview();
     state.view = view;
     state.viewError = '';
     state.pagination[view] = { nextCursor: '' };
@@ -797,6 +860,90 @@
     }
   }
 
+  function clearReviewPreview() {
+    reviewPreviewGeneration += 1;
+    const wasOpen = !!state.reviewPreview;
+    state.reviewPreview = null;
+    if (wasOpen && !document.querySelector('.action-modal')) document.body.style.overflow = '';
+  }
+
+  function queueItemById(id, queue = 'content') {
+    const queueItems = itemsOf(state.dataByView.overview && state.dataByView.overview.queue || {});
+    return queueItems.find((entry) => entry.id === id && (entry.queue || entry.type) === queue) || null;
+  }
+
+  function reviewDetailAssetsAreReadable(detail) {
+    if (!readableReviewAssets(detail)) return false;
+    if (detail.coverAssetId) {
+      const cover = (detail.assets || []).find((asset) => asset.assetId === detail.coverAssetId);
+      if (!cover || !reviewPreviewImageUrl(cover.url)) return false;
+    }
+    return true;
+  }
+
+  async function loadReviewPreview(item) {
+    if (!isRichReviewItem(item)) return;
+    const payload = contentDetailPayload(item);
+    if (!payload) {
+      state.reviewPreview = { item, loading: false, error: '审核队列版本暂不可用，请刷新审核队列后重试。', stale: true };
+      renderShell();
+      return;
+    }
+    const generation = ++reviewPreviewGeneration;
+    const clubId = state.clubId;
+    state.reviewPreview = { item, loading: true, error: '', detail: null, stale: false };
+    document.body.style.overflow = 'hidden';
+    renderShell();
+    const closeButton = root.querySelector('.review-preview__header [data-review-preview-close]');
+    if (closeButton) closeButton.focus();
+    try {
+      const detail = await api.action('admin/content/detail', clubId, payload);
+      if (generation !== reviewPreviewGeneration || state.clubId !== clubId || state.view !== 'overview') return;
+      const currentItem = queueItemById(item.id);
+      if (!isCurrentRichReviewDetail(item, detail) || !reviewDetailAssetsAreReadable(detail)) {
+        state.reviewPreview = {
+          item,
+          loading: false,
+          error: '全文详情与当前队列版本不一致，或图片暂不可读取。请刷新审核队列后重新打开。',
+          stale: true,
+        };
+      } else if (!currentItem || Number(currentItem.version) !== Number(item.version)) {
+        state.reviewPreview = {
+          item,
+          loading: false,
+          error: '审核队列已更新，当前版本不能继续审核。请刷新队列后重新打开。',
+          stale: true,
+        };
+      } else {
+        state.reviewPreview = { item, detail, loading: false, error: '', stale: false };
+      }
+    } catch (error) {
+      if (generation !== reviewPreviewGeneration || state.clubId !== clubId || state.view !== 'overview') return;
+      if (error.status === 401) {
+        clearReviewPreview();
+        await expireSession();
+        return;
+      }
+      const stale = error.status === 409 || error.status === 404 || error.status === 403;
+      state.reviewPreview = {
+        item,
+        loading: false,
+        error: error.status === 409
+          ? '这篇文章已更新，当前队列版本已失效。请刷新审核队列后再审核。'
+          : stale
+            ? '这篇文章已不在当前待审版本中，不能继续审核。请刷新审核队列。'
+            : '全文读取失败，审核操作已锁定。请检查网络后重试。',
+        stale,
+      };
+    }
+    renderShell();
+  }
+
+  function openReviewPreview(button) {
+    const item = queueItemById(button.dataset.reviewPreview);
+    if (item) loadReviewPreview(item);
+  }
+
   async function submitReview(button) {
     const queue = button.dataset.queue;
     const id = button.dataset.id;
@@ -807,9 +954,22 @@
     const action = reviewActionsFor(item).find((entry) => entry.key === button.dataset.reviewKey);
     const route = REVIEW_ACTIONS[queue];
     if (!action || !route || item.version === undefined || item.version === null) return;
+    const richReview = isRichReviewItem(item);
+    const previewDetail = state.reviewPreview && state.reviewPreview.detail;
+    if (richReview && (!isCurrentRichReviewDetail(item, previewDetail) || !reviewDetailAssetsAreReadable(previewDetail))) {
+      setBanner('尚未读取并核对这篇文章的当前全文，审核决定已锁定。', 'error');
+      clearReviewPreview();
+      renderShell();
+      return;
+    }
     const decision = action.key;
     const targetId = queue === 'appeals' ? item.appealId || item.id : item.id;
-    const targetText = [item.title || item.displayName || item.subject || '待处理事项', item.summary, `版本 ${item.version}`]
+    const targetText = [
+      richReview ? previewDetail.title : item.title || item.displayName || item.subject || '待处理事项',
+      richReview ? previewDetail.summary : item.summary,
+      richReview ? '已打开完整文章预览，请核对标题、摘要、封面和正文后提交。' : '',
+      `版本 ${item.version}`,
+    ]
       .filter(Boolean).join('\n');
     const result = await showActionDialog({
       title: action.label || '审核决定',
@@ -828,6 +988,7 @@
     const payload = queue === 'appeals'
       ? { appealId: targetId, decision, expectedVersion: item.version, reason }
       : { id: targetId, decision, expectedVersion: item.version, reason };
+    if (richReview) clearReviewPreview();
     await write(route, state.clubId, payload, '审核决定已提交。', 'overview');
   }
 
@@ -1070,6 +1231,17 @@
       setView(viewButton.dataset.view);
       return;
     }
+    const previewCloseButton = event.target.closest('[data-review-preview-close]');
+    if (previewCloseButton) {
+      clearReviewPreview();
+      renderShell();
+      return;
+    }
+    const previewButton = event.target.closest('[data-review-preview]');
+    if (previewButton) {
+      openReviewPreview(previewButton);
+      return;
+    }
     const reviewButton = event.target.closest('[data-review-key]');
     if (reviewButton) {
       await submitReview(reviewButton);
@@ -1143,6 +1315,14 @@
       case 'logout': await logout(); break;
       case 'refresh': await loadView(); break;
       case 'queue-more': await loadView('overview', { append: true }); break;
+      case 'review-preview-refresh':
+        clearReviewPreview();
+        state.pagination.overview = { nextCursor: '' };
+        await loadView('overview');
+        break;
+      case 'review-preview-retry':
+        if (state.reviewPreview) await loadReviewPreview(state.reviewPreview.item);
+        break;
       case 'members-more': await loadView('members', { append: true }); break;
       case 'invites-more': await loadView('invites', { append: true }); break;
       case 'audit-more': await loadView('audit', { append: true }); break;
@@ -1214,6 +1394,11 @@
 
   root.addEventListener('click', handleClick);
   root.addEventListener('change', handleChange);
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !state.reviewPreview || document.querySelector('.action-modal')) return;
+    clearReviewPreview();
+    renderShell();
+  }, true);
   root.addEventListener('submit', (event) => {
     const form = event.target.closest('form[data-form]');
     if (!form) return;

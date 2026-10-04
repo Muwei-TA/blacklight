@@ -8,7 +8,7 @@
  * - 注销申请：停止展示后按保留期清理，任何一步失败都保留可重试状态
  */
 
-const { COLLECTIONS, ASSET_STATUS } = require('../shared/constants');
+const { COLLECTIONS } = require('../shared/constants');
 const db = require('../shared/db');
 const recovery = require('../recovery');
 
@@ -133,39 +133,15 @@ async function claimCleanupAsset(asset, now = Date.now()) {
   return result.stats && result.stats.updated === 1 ? { ...asset, ...patch } : null;
 }
 
-function orphanStatuses() {
-  return [
-    ASSET_STATUS.INTENT,
-    ASSET_STATUS.UPLOADED,
-    ASSET_STATUS.VERIFYING,
-    ASSET_STATUS.VERIFIED,
-    ASSET_STATUS.REJECTED,
-    ASSET_STATUS.FAILED,
-  ];
-}
-
 /**
  * 未绑定内容的附件：确认文件删除成功后才删记录。
  * 文件或记录写入失败时保留资产文档，下一轮按 cleanupNextAttemptAt 重试。
  */
 async function cleanupOrphanAssets(clubId) {
   if (!clubId) throw new Error('cleanup club is required');
-  const _ = db.command();
   const now = Date.now();
-  const cutoff = new Date(now - ORPHAN_ASSET_TTL);
-
-  const res = await db
-    .coll(COLLECTIONS.assets, clubId)
-    .where({
-      clubId,
-      postId: '',
-      createdAt: _.lt(cutoff),
-      status: _.in(orphanStatuses()),
-    })
-    .limit(50)
-    .get();
-
-  const assets = (res.data || []).filter((asset) => cleanupDue(asset, now));
+  const candidates = await db.getDb().rpc('hg_orphan_asset_candidates', { p_club_id: clubId });
+  const assets = candidates.filter((asset) => cleanupDue(asset, now));
   let removed = 0;
   let retryable = 0;
   let skipped = 0;

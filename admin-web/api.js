@@ -1,5 +1,5 @@
 const ALLOWED_ACTIONS = new Set([
-  'admin/overview', 'admin/queue', 'admin/content/decide', 'admin/comment/decide', 'admin/topic/decide',
+  'admin/overview', 'admin/queue', 'admin/content/detail', 'admin/content/decide', 'admin/comment/decide', 'admin/topic/decide',
   'admin/board/decide', 'admin/membership/decide', 'admin/report/decide', 'admin/collection/decide',
   'admin/appeal/decide',
   'admin/members/list', 'admin/member/remove', 'admin/member/mute', 'admin/member/role',

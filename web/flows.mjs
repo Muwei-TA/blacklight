@@ -92,7 +92,7 @@ export function createFlows({ state, api, navigate, refreshAccount, loadRoute, s
       if (name === 'write') {
         const draft = draftFor(form);
         const assetIds = await uploadFiles(form, clubId, draft);
-        const input = { kind: values.kind, title: values.title, body: values.body, visibility: values.visibility, identityMode: values.identityMode, topicId: values.visibility === 'private' ? '' : values.topicId, boardId: values.visibility === 'private' ? '' : values.boardId, commentsEnabled: values.commentsEnabled === 'on' && values.visibility !== 'private', assetIds };
+        const input = { kind: values.kind || 'fragment', title: values.title, body: values.body, visibility: values.visibility, identityMode: values.identityMode, topicId: values.visibility === 'private' ? '' : values.topicId, boardId: values.visibility === 'private' ? '' : values.boardId, commentsEnabled: values.commentsEnabled === 'on' && values.visibility !== 'private', assetIds };
         const result = await action('posts/create', { ...input, idempotencyKey: idempotencyKey(draft, input) });
         if (isCurrent(token)) { setClean(); navigate('post', result.id || result.postId); toast(result.state === 'private_saved' ? '已保存，仅自己可见' : result.state === 'published' ? '这段表达已发布' : '已收到，等待审核后展示'); }
         return;

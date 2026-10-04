@@ -16,6 +16,7 @@ const platform = require('./domain/platform');
 const clubs = require('./domain/clubs');
 const levels = require('./domain/levels');
 const posts = require('./domain/posts');
+const drafts = require('./domain/drafts');
 const topics = require('./domain/topics');
 const boards = require('./domain/boards');
 const collections = require('./domain/collections');
@@ -55,6 +56,13 @@ const handlers = {
   'posts/list': posts.listFeed,
   'posts/detail': posts.getDetail,
   'posts/create': posts.createPost,
+  'drafts/list': drafts.list,
+  'drafts/get': drafts.get,
+  'drafts/save': drafts.save,
+  'drafts/delete': drafts.remove,
+  'drafts/submit': drafts.submit,
+  'posts/resubmit-rich': drafts.resubmit,
+  'admin/content/detail': moderation.getContentDetail,
   'posts/resubmit': posts.resubmitRejectedPost,
   'posts/visibility': posts.changeVisibility,
   'posts/delete': posts.deletePost,

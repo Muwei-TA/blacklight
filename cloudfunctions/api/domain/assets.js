@@ -64,13 +64,15 @@ async function createIntent(payload, ctx) {
   if (!ctx.viewer.isMember) throw errors.membershipInvalid();
   if (!policies.canUseUploads(ctx.viewer, ctx.capabilities)) throw errors.forbidden();
   const input = ensureImageIntentPayload(payload);
+  const draftId = process.env.REVIEW_PROVIDER === 'manual' ? validators.requireId(payload.draftId, 'draftId') : validators.optionalId(payload.draftId, 'draftId');
   const key = validators.requireString(payload.idempotencyKey, '请求标识', { min: 8, max: 120 });
+  if ((draftId || process.env.REVIEW_PROVIDER === 'manual') && ctx.channel !== 'web') throw errors.forbidden({ reason: 'website session required' });
   const assetId = crypto.randomUUID();
   const createdAt = db.serverDate();
   const asset = {
     _id: assetId, ownerId: ctx.viewer.userId, clubId, mediaType: 'image', declaredSize: input.size,
     quotaBytes: MAX_DECODED_BYTES, declaredDuration: 0, mimeType: input.mimeType,
-    status: ASSET_STATUS.INTENT, postId: '', postVersion: 0, fileId: '', cleanedFileId: '',
+    draftId, status: ASSET_STATUS.INTENT, postId: '', postVersion: 0, fileId: '', cleanedFileId: '',
     cloudPath: buildStoragePath(), expiresAt: new Date(nowMillis()+INTENT_TTL_MS).toISOString(),
     reviewTaskId: '', tempFileURL: '', coverURL: '', createdAt, updatedAt: createdAt,
   };
@@ -99,6 +101,7 @@ async function uploadImage(payload, ctx) {
   const assetId = validators.requireId(payload.assetId, 'assetId');
   const key = validators.requireString(payload.idempotencyKey, '请求标识', { min: 8, max: 120 });
   const asset = await findOwnedIntent(assetId, ctx);
+  if (asset.draftId && ctx.channel !== 'web') throw errors.forbidden({ reason: 'website session required' });
   let cleaned;
   try { cleaned = sanitizeImageBase64(payload.contentBase64, { declaredMimeType: asset.mimeType }); }
   catch (err) { if (err instanceof ImageProcessingError) throw errors.invalidInput(err.message, { code: err.code }); throw err; }
@@ -139,6 +142,12 @@ async function confirmUpload(payload, ctx) {
   if (payload.fileId) throw errors.invalidInput('客户端不能提交 fileId', { field: 'fileId' });
   const assetId = validators.requireId(payload.assetId, 'assetId');
   const clubId = ctx.viewer.clubId;
+  const owned = await findOwnedIntent(assetId, ctx);
+  if (owned.draftId || process.env.REVIEW_PROVIDER === 'manual') {
+    if (ctx.channel !== 'web') throw errors.forbidden({ reason: 'website session required' });
+    if (owned.status !== ASSET_STATUS.UPLOADED && owned.status !== ASSET_STATUS.VERIFIED) throw errors.pendingMedia();
+    return { assetId, status: owned.status };
+  }
   await imageRpc('hg_confirm_image', { p_owner: ctx.viewer.userId, p_asset_id: assetId, p_club_id: clubId });
   await require('./foreground-review').runOwnedReview('asset', assetId, ctx).catch(() => null);
   const current = await findOwnedIntent(assetId, ctx);
@@ -188,11 +197,16 @@ async function getStatus(payload, ctx) {
   if (!asset || !(await canReadAsset(asset, ctx))) throw errors.notAccessible({ assetId });
   const post = asset.postId ? await db.findOneById(COLLECTIONS.posts, asset.postId, clubId) : null;
 
+  let previewUrl = '';
+  if (asset.draftId && asset.ownerId === ctx.viewer.userId && ctx.viewer.isMember) {
+    const draft = await require('./drafts').rpc('get', { id: asset.draftId }, ctx);
+    if (draft.status === 'draft') previewUrl = require('./drafts').mediaUrl(asset, draft, 'draft');
+  }
   return {
     assetId,
     status: asset.status,
     mediaType: asset.mediaType,
-    url: await authorizedUrl(asset, ctx, post),
+    url: previewUrl || await authorizedUrl(asset, ctx, post),
     cover: '',
     failureReason: asset.status === ASSET_STATUS.REJECTED ? asset.failureReason || '未通过内容检查' : '',
     width: asset.width || 0,

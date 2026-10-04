@@ -67,7 +67,7 @@ PostgreSQL 和 worker 只接内部网络；API 同时连接接入网络，默认
 
 两项迁移均不改写既有用户、成员资格或作品。数据库登录角色必须有 `service_role` 权限，普通客户端角色没有新表权限。
 
-现有 NAS 的 `scripts/local-apply-migrations.sh` 现验证 28 个迁移；最新文件为 `20261004100000_fix_platform_club_advisory_lock.sql`，`scripts/local-migration-lib.mjs` 的 inventory 为 36 个源表。建议使用现有部署的迁移命令和校验账本，在数据库容器中设置 `LOCAL_MIGRATIONS_DIR`、`LOCAL_COMPAT_DIR`、`NAS_APP_DATABASE_PASSWORD_FILE`、`POSTGRES_USER`、`POSTGRES_DB` 后执行脚本。它会跳过已有且 checksum 一致的迁移，并在事务中执行新迁移和登记账本。
+现有 NAS 的 `scripts/local-apply-migrations.sh` 现验证 29 个迁移；最新文件为 `20261004110000_rich_article_drafts.sql`，`scripts/local-migration-lib.mjs` 的 inventory 为 37 个源表。建议使用现有部署的迁移命令和校验账本，在数据库容器中设置 `LOCAL_MIGRATIONS_DIR`、`LOCAL_COMPAT_DIR`、`NAS_APP_DATABASE_PASSWORD_FILE`、`POSTGRES_USER`、`POSTGRES_DB` 后执行脚本。它会跳过已有且 checksum 一致的迁移，并在事务中执行新迁移和登记账本。
 
 只用 `psql -f` 执行新 SQL 不会自动更新 NAS 的 `nas_meta.schema_migrations`，NAS 健康检查仍会失败。不要编辑旧迁移绕过 checksum。网站 Compose 的初始化也复用同一迁移脚本与账本。
 
@@ -107,7 +107,7 @@ node scripts/local-web-account.mjs --user-id EXISTING_USER_ID --username reader_
 
 ## 备份与会话清理
 
-同时备份 PostgreSQL 与私有媒体。包含网站凭据的数据库备份属于私密运维资料，不得放在公开下载目录。原 NAS 备份脚本的迁移数量也已更新为 28。网站 Compose 可停 API 和 worker 后，在 DB 容器运行 `pg_dump`，并保存 private-media volume；恢复到独立数据库后验证迁移账本和媒体清单。不要删除现有数据卷来“重跑初始化”。worker 每日清理过期/撤销的网站会话与旧限频桶。
+同时备份 PostgreSQL 与私有媒体。包含网站凭据的数据库备份属于私密运维资料，不得放在公开下载目录。原 NAS 备份脚本的迁移数量也已更新为 29。网站 Compose 可停 API 和 worker 后，在 DB 容器运行 `pg_dump`，并保存 private-media volume；恢复到独立数据库后验证迁移账本和媒体清单。不要删除现有数据卷来“重跑初始化”。worker 每日清理过期/撤销的网站会话与旧限频桶。
 
 ## 自动验证
 
@@ -135,3 +135,16 @@ WEB_BROWSER_BASE=http://127.0.0.1:3000 PLAYWRIGHT_MODULE=/path/to/playwright/ind
 ```
 
 它验证 8 个场景，并自行删除本轮新建的私密验收文章；截图账号只在隔离库使用。复现初审缺陷的脚本与修复后的验收脚本作用不同，不能将初审的“观察到缺陷”当作修复通过。
+
+
+## 图文文章升级（第 29 项迁移）
+
+`20261004110000_rich_article_drafts.sql` 在原 28 项校验和保持不变的基础上增加 `hg_article_drafts` 与服务角色 RPC，并包装图片意图、孤儿清理和人工审核事务。旧帖子、纯文本创建、自动审核和旧客户端读取继续使用原数据结构；新文章补充 `format: richtext-v1`、`richDoc`、`summary`、`coverAssetId`，并保留服务端派生的 `body`、`paragraphs`、`media.images`。
+
+迁移前同时备份数据库和私有媒体并在隔离库恢复验证，暂停 API 写入及 worker 后执行现有增量迁移脚本。它只追加第 29 项并核对前 28 项校验和。新 API 与 worker 必须同批切换；worker 的草稿引用保护是此功能的必要部分。回退旧 worker 前必须验证它仍调用新迁移的 `hg_cleanup_asset` 包装保护；否则其孤儿扫描会包含超过 24 小时的草稿图片。回退需先停 worker 并关闭新编辑入口，保留新数据库表、媒体卷和原镜像，不删除草稿。
+
+网站 `REVIEW_PROVIDER=manual` 下普通短笔仍不开放图片，`session/me.capabilities.uploads=false`；独立文章编辑器使用 `richUploads`，其值来自社团实际上传能力。JPEG/PNG 经过限额、解码和清洗后保持 `uploaded`，不因清洗直接公开。文章人工批准在单个数据库事务内检查当前版本、任务与所有图片，再将图片标记 `verified` 并发布；失败整笔回滚。私密文章不进入审核队列，图片只允许作者读取。
+
+草稿动作走既有 Cookie/CSRF 通道，服务端注入的网站渠道标记阻止普通 Bearer 或微信云函数直接进入富文写作链路；`drafts/save` 使用版本 CAS，`drafts/submit` 带幂等键。退回文章通过带 `sourcePostId/sourcePostVersion` 的草稿保留原图，再调用 `posts/resubmit-rich`，保持原作者、社团、可见范围、身份、话题和板块。旧 `posts/resubmit` 对富文返回明确错误。媒体 `/v1/web/media/:assetId` 每次检查当前社团资格、草稿或帖子版本及资产归属，并返回 `private, no-store`；审核员只能预览已投稿的当前待审版本，平台 developer 身份不提供社团内容例外。
+
+隔离验证可用 `PG_TEST_URL=postgresql://muwei@127.0.0.1:55432/blacklight_test HG_TEST_DATABASE_RESET=yes node --test tests/integration/rich-articles-pg.test.mjs`。该测试只允许 loopback 的 disposable `blacklight_test` 数据库，并通过本机 HTTP Cookie/CSRF 执行合成账号、草稿 CAS、图片上传、24 小时保护、联合人工审核、拒绝重提与私密读取；不代表真实 NAS、浏览器页面或真机验收。

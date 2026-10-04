@@ -143,6 +143,7 @@ async function resubmitRejectedPost(payload, ctx) {
   const idempotencyKey = validators.requireString(payload.idempotencyKey, '请求标识', { max: 120 });
   const post = await db.findOneById(COLLECTIONS.posts, id, clubId);
   if (!post || post.ownerId !== ctx.viewer.userId) throw errors.notAccessible({ postId: id });
+  if (post.format === 'richtext-v1') throw errors.invalidInput('请在网站文章编辑器修改并重新提交富文本文章');
   if (!policies.canUsePublishing(ctx.viewer, ctx.capabilities)
     || (post.status === POST_STATUS.REJECTED
       && !policies.canResubmitRejectedPost(ctx.viewer, post, ctx.capabilities))) {

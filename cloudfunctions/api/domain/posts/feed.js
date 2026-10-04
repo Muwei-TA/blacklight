@@ -64,8 +64,8 @@ async function hydrateCards(posts, ctx) {
   const boardById = new Map(boards.map((b) => [b._id, b]));
 
   const readableAssets = await assetDomain.signReadableAssets(assets, posts, ctx);
-  return posts.map((post) =>
-    presenters.presentPostCard(post, {
+  return posts.map((post) => {
+    const card = presenters.presentPostCard(post, {
       viewer: ctx.viewer,
       authorUser: userById.get(post.ownerId),
       alias: aliasDocs.get(post._id),
@@ -75,8 +75,13 @@ async function hydrateCards(posts, ctx) {
       reacted: myReactions.has(post._id),
       bookmarked: myBookmarks.has(post._id),
       now: ctx.now,
-    }),
-  );
+    });
+    if (post.format === 'richtext-v1') {
+      card.assets = readableAssets.filter((a) => (post.assetIds || []).includes(a._id)).map((a) => ({ assetId: a._id, status: a.status, width: a.width || 0, height: a.height || 0, url: policies.canReadRichAsset(ctx.viewer, a, post, { version: post.version }) ? require('../drafts').mediaUrl(a, post) : '' }));
+      card.coverUrl = card.assets.find((a) => a.assetId === post.coverAssetId)?.url || card.assets.find((a) => a.url)?.url || '';
+    }
+    return card;
+  });
 }
 
 async function loadMyFlags(collection, userId, postIds, clubId) {
@@ -189,6 +194,15 @@ async function getDetail(payload, ctx) {
     now: ctx.now,
   });
 
+  if (post.format === 'richtext-v1') {
+    let reviewReady = false;
+    if (ctx.viewer.isAdmin && post.status === 'pending') {
+      const tasks = await db.coll(COLLECTIONS.reviewTasks, ctx.viewer.clubId).where({ clubId: ctx.viewer.clubId, targetType: 'post', targetId: id, postVersion: post.version, status: 'manual' }).limit(1).get();
+      reviewReady = tasks.data.length > 0;
+    }
+    dto.assets = assets.map((asset) => ({ assetId: asset._id, status: asset.status, width: asset.width || 0, height: asset.height || 0,
+      url: policies.canReadRichAsset(ctx.viewer, asset, post, { version: post.version, reviewReady }) ? require('../drafts').mediaUrl(asset, post) : '' }));
+  }
   if (process.env.NODE_ENV !== 'production') anonymity.assertNoIdentityLeak(dto, 'detail');
   return dto;
 }

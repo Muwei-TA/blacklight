@@ -86,7 +86,8 @@ function presentStatusText(post, viewer) {
  */
 function presentMedia(post, assets = []) {
   const byId = new Map(assets.map((a) => [a._id, a]));
-  const bound = (post.assetIds || []).map((id) => byId.get(id)).filter(Boolean);
+  const orderedIds = post.coverAssetId ? [post.coverAssetId, ...(post.assetIds || []).filter((id) => id !== post.coverAssetId)] : (post.assetIds || []);
+  const bound = orderedIds.map((id) => byId.get(id)).filter(Boolean);
 
   const images = bound.filter((a) => a.mediaType === 'image');
   const video = bound.find((a) => a.mediaType === 'video');
@@ -132,7 +133,10 @@ function presentPostCard(post, context = {}) {
     category: post.category || '',
     categoryText: post.categoryText || '',
     title: post.title || '',
-    excerpt: excerpt(post.body, post.kind === 'article' ? 80 : 140),
+    format: post.format || 'plain',
+    summary: post.summary || '',
+    coverAssetId: post.coverAssetId || '',
+    excerpt: excerpt(post.summary || post.body, post.kind === 'article' ? 80 : 140),
     createdAtText: formatRelativeTime(post.createdAt, now),
     visibility: post.visibility,
     identityMode: post.identityMode,
@@ -157,6 +161,7 @@ function presentPostDetail(post, context = {}) {
   return {
     ...card,
     body: post.body || '',
+    ...(post.format === 'richtext-v1' ? { richDoc: require('./rich-document').normalizeRichDocument(post.richDoc, post.coverAssetId).richDoc, assetIds: post.assetIds || [] } : {}),
     // 段落由服务端切分，前端只渲染，首版不支持任意 HTML
     paragraphs: String(post.body || '')
       .split(/\n{2,}/)

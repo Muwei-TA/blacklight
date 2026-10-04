@@ -83,11 +83,11 @@ function createServer({ adminWebAuth = createAdminWebAuth(), webActionHandler = 
   const { HTTP_BY_KIND } = require('../shared/errors');
   const actionHandler = api.createHandler({ identityResolver: auth.resolveBearerIdentity });
   const adminActionHandler = webActionHandler || api.createHandler({
-    identityResolver: async (context = {}) => context.adminWebIdentity || { openid: null, invalid: false },
+    identityResolver: async (context = {}) => ({ ...(context.adminWebIdentity || { openid: null, invalid: false }), channel: 'web' }),
   });
 
-  const websiteHandler = api.createHandler({ identityResolver: async (context = {}) => context.webIdentity || { openid: null, invalid: false } });
-  const handleWebsite = createWebHttp({ auth: websiteAuth, actionHandler: websiteHandler });
+  const websiteHandler = api.createHandler({ identityResolver: async (context = {}) => ({ ...(context.webIdentity || { openid: null, invalid: false }), channel: 'web' }) });
+  const handleWebsite = createWebHttp({ auth: websiteAuth, actionHandler: websiteHandler, mediaSessionResolver: resolveAdminSession });
   async function resolveAdminSession(req) {
     return await adminWebAuth.resolveSession(req) || websiteAuth.resolveSession(req);
   }
@@ -406,6 +406,7 @@ function createServer({ adminWebAuth = createAdminWebAuth(), webActionHandler = 
           '.css': 'text/css; charset=utf-8',
           '.html': 'text/html; charset=utf-8',
           '.js': 'text/javascript; charset=utf-8',
+          '.mjs': 'text/javascript; charset=utf-8',
           '.json': 'application/json; charset=utf-8',
           '.svg': 'image/svg+xml',
           '.png': 'image/png',

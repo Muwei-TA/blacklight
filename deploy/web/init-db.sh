@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# The shared migrator records checksums and verifies all 28 migrations.
+# The shared migrator records checksums and verifies all 29 migrations.
 # This file runs only on initial PostgreSQL volume creation.
 password_file="$(mktemp)"
 trap 'rm -f "$password_file"' EXIT

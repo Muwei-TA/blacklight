@@ -94,6 +94,7 @@ async function listManualContentQueue(cursor, pageSize, ctx, internal, includeEq
         visibility: post.visibility,
         isAnonymous: post.identityMode === 'anonymous',
         kind: post.kind || 'fragment',
+        format: post.format === 'richtext-v1' ? 'richtext-v1' : 'plain',
         version: post.version || 1,
         submittedAtText: presenters.formatRelativeTime(task.createdAt, ctx.now),
         statusText: post.kind === 'article' ? '等待管理员审批' : '等待人工复核',
@@ -564,6 +565,7 @@ async function revealAnonymous(payload, ctx) {
 
 module.exports = {
   QUEUES,
+  getContentDetail,
   listQueue,
   decideContent,
   decideComment,
@@ -574,3 +576,16 @@ module.exports = {
   decideCollection,
   revealAnonymous,
 };
+
+async function getContentDetail(payload, ctx) {
+  if (ctx.channel !== 'web') throw errors.forbidden({ reason: 'website session required' });
+  if (!policies.canAccessModeration(ctx.viewer)) throw errors.forbidden();
+  const id = validators.requireId(payload.id, 'id');
+  const expectedVersion = requiredExpectedVersion(payload);
+  const post = await db.findOneById(COLLECTIONS.posts, id, ctx.viewer.clubId);
+  if (!post || post.status !== 'pending' || post.visibility === VISIBILITY.PRIVATE) throw errors.notAccessible();
+  if (post.version !== expectedVersion) throw errors.conflict();
+  const tasks = await db.coll(COLLECTIONS.reviewTasks, ctx.viewer.clubId).where({ clubId: ctx.viewer.clubId, targetType: 'post', targetId: id, postVersion: expectedVersion, status: 'manual' }).limit(1).get();
+  if (!tasks.data.length) throw errors.notAccessible();
+  return require('./posts/feed').getDetail({ id }, ctx);
+}

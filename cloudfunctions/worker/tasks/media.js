@@ -109,6 +109,7 @@ async function processAsset(task) {
       waitingReason: 'media_callback',
     };
   }
+  if (asset.draftId || process.env.REVIEW_PROVIDER === 'manual') return { status: REVIEW_TASK_STATUS.MANUAL, note: 'image awaits article review' };
   if (asset.status !== ASSET_STATUS.UPLOADED) {
     return { status: REVIEW_TASK_STATUS.QUEUED, note: `waiting upload, now ${asset.status}` };
   }

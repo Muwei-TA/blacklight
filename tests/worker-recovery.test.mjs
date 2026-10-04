@@ -95,6 +95,7 @@ const cleanupDb = {
   getDb() {
     return {
       async rpc(name, args) {
+        if (name === 'hg_orphan_asset_candidates') return cleanupState.assets;
         cleanupState.rpcCalls.push({ name, args });
         if (name !== 'hg_cleanup_asset') throw new Error(`unexpected cleanup RPC: ${name}`);
         const index = cleanupState.assets.findIndex((asset) => asset._id === args.p_asset_id);

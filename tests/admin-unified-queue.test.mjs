@@ -181,3 +181,27 @@ test('不接受伪造的全队列 cursor 分类', async () => {
     (error) => error.kind === 'invalid_input',
   );
 });
+
+test('审核队列区分富文和旧纯文文章且保留原 DTO 字段', async () => {
+  reset();
+  const createdAt = '2026-10-04T08:00:00.000Z';
+  posts = [
+    { _id: 'plain-article', clubId: constants.DEFAULT_CLUB_ID, status: 'pending', visibility: 'club', version: 1, kind: 'article', title: '旧文章', body: '旧正文' },
+    { _id: 'rich-article', clubId: constants.DEFAULT_CLUB_ID, status: 'pending', visibility: 'club', version: 1, kind: 'article', format: 'richtext-v1', title: '图文文章', body: '图文正文', assetIds: ['asset-1'] },
+  ];
+  fixtures.set(constants.COLLECTIONS.reviewTasks, posts.map((post) => ({
+    _id: `review:${post._id}`, clubId: constants.DEFAULT_CLUB_ID, targetType: 'post', targetId: post._id,
+    postVersion: 1, status: 'manual', createdAt,
+  })));
+  for (const queue of ['content', 'all']) {
+    const result = await moderation.listQueue({ queue }, ctx);
+    assert.deepEqual(result.items.map((item) => ({ id: item.id, format: item.format })), [
+      { id: 'plain-article', format: 'plain' }, { id: 'rich-article', format: 'richtext-v1' },
+    ]);
+    assert.deepEqual(result.items.map((item) => item.kind), ['article', 'article']);
+    assert.equal(result.items[1].title, '图文文章');
+    assert.equal(result.items[1].summary, '图文正文');
+    assert.deepEqual(result.items[1].assetIds, ['asset-1']);
+    assert.equal(result.items[1].version, 1);
+  }
+});

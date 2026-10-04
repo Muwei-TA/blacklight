@@ -16,6 +16,7 @@ const ADMIN_WEB_ACTIONS = new Set([
   'admin/overview',
   'admin/queue',
   'admin/content/decide',
+  'admin/content/detail',
   'admin/comment/decide',
   'admin/topic/decide',
   'admin/board/decide',

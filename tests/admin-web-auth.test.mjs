@@ -169,3 +169,18 @@ test('browser admin action endpoint rejects actions outside the management white
     assert.equal(response.status, 400);
   });
 });
+
+test('admin ECMAScript modules are served with JavaScript MIME for GET and HEAD', async () => {
+  await withServer(async (baseUrl) => {
+    for (const method of ['GET', 'HEAD']) {
+      const response = await fetch(`${baseUrl}/admin/admin-app.mjs`, { method });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-type'), 'text/javascript; charset=utf-8');
+      assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+      assert.ok(Number(response.headers.get('content-length')) > 0);
+      const body = await response.text();
+      if (method === 'HEAD') assert.equal(body, '');
+      else assert.ok(body.length > 0);
+    }
+  });
+});

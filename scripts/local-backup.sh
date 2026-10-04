@@ -6,7 +6,7 @@ MODE="${1:-backup}"
 NAS_MEDIA_DIR="${NAS_MEDIA_DIR:-/media}"
 NAS_BACKUP_DIR="${NAS_BACKUP_DIR:-/backups/blacklight-nas-data}"
 NAS_RESTORE_CHECK_DIR="${NAS_RESTORE_CHECK_DIR:-/restore-check}"
-EXPECTED_MIGRATIONS=28
+EXPECTED_MIGRATIONS=29
 ADMIN_PASSWORD_FILE="${NAS_POSTGRES_ADMIN_PASSWORD_FILE:-/run/secrets/postgres_admin_password}"
 RESTORE_DB=""
 RESTORE_STAGE=""
@@ -98,7 +98,7 @@ schema_preflight() {
   session_table="$(psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atq \
     -c "SELECT to_regclass('public.hg_sessions') IS NOT NULL")"
   if [[ "$session_table" != "t" ]]; then
-    echo "database schema is not at the expected 28-migration NAS state" >&2
+    echo "database schema is not at the expected 29-migration NAS state" >&2
     return 1
   fi
   verify_migration_ledger "$POSTGRES_DB"

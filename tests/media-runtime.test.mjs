@@ -198,6 +198,7 @@ test('orphan cleanup sends fileId, cleanedFileId and reservedFileId and keeps re
     }),
     serverDate: () => 'now',
     getDb: () => ({ async rpc(name, args) {
+      if (name === 'hg_orphan_asset_candidates') return [asset];
       cleanupCalls.push({ name, args });
       return args.p_action === 'remove_orphan' ? { stats: { removed: 1 } } : { stats: { updated: 1 } };
     } }),
@@ -244,6 +245,7 @@ test('purge clears every stored object id after successful delete', async () => 
     command: () => ({ exists: (value) => ({ $exists: value }) }),
     serverDate: () => 'now',
     getDb: () => ({ async rpc(name, args) {
+      if (name === 'hg_orphan_asset_candidates') return [asset];
       cleanupCalls.push({ name, args });
       return { stats: { updated: 1 } };
     } }),

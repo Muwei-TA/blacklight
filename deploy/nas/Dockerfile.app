@@ -1,3 +1,13 @@
+FROM node:22-bookworm-slim AS web-build
+
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    npm ci --strict-ssl=true
+COPY web/ ./web/
+RUN npm run build:web-editor
+
 FROM node:22-bookworm-slim
 
 RUN apt-get update \
@@ -16,6 +26,7 @@ COPY cloudfunctions/api/ ./cloudfunctions/api/
 COPY cloudfunctions/worker/ ./cloudfunctions/worker/
 COPY admin-web/ ./admin-web/
 COPY web/ ./web/
+COPY --from=web-build /build/web/editor.bundle.mjs ./web/editor.bundle.mjs
 COPY scripts/sync-shared.mjs ./scripts/sync-shared.mjs
 COPY scripts/local-media-manifest.mjs scripts/local-media-receiver.mjs ./scripts/
 COPY scripts/local-platform-role.mjs scripts/local-web-account.mjs ./scripts/

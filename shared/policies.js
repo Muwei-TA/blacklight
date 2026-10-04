@@ -379,3 +379,20 @@ module.exports = {
   computeCommentViewerFlags,
   VISIBILITY_RANK,
 };
+
+// Rich images stay quarantined until the complete submitted version is approved.
+function canReadRichAsset(viewer, asset, target, { draft = false, version, reviewReady = false } = {}) {
+  if (!sameClub(viewer, asset) || !sameClub(viewer, target)
+    || String(target.version) !== String(version) || asset.ownerId !== target.ownerId
+    || !['uploaded', 'verified'].includes(asset.status) || !asset.fileId || asset.cleanupState === 'running') return false;
+  if (!viewer.isMember && !(target.status === POST_STATUS.PUBLISHED && target.visibility === VISIBILITY.PUBLIC && asset.status === 'verified' && canReadPostMedia(viewer, target))) return false;
+  if (draft) return target.status === 'draft' && asset.draftId === target._id && isOwner(viewer, target);
+  if (asset.postId !== target._id || !(target.assetIds || []).includes(asset._id)
+    || ['deleted', 'hidden', 'superseded'].includes(target.status)) return false;
+  if (isOwner(viewer, target)) return true;
+  if (target.visibility === VISIBILITY.PRIVATE) return false;
+  if (target.status === POST_STATUS.PUBLISHED) return asset.status === 'verified' && canReadPostMedia(viewer, target);
+  return target.status === POST_STATUS.PENDING && viewer.isAdmin && reviewReady
+    && Number(asset.postVersion) === Number(target.version);
+}
+module.exports.canReadRichAsset = canReadRichAsset;

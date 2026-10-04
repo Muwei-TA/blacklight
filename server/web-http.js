@@ -6,7 +6,7 @@ const { isIP } = require('node:net');
 const { WebAuthError, buildCookie, validCsrf } = require('./web-auth');
 const { HTTP_BY_KIND } = require('../shared/errors');
 const PUBLIC_READS = new Set(['account/me', 'session/me', 'clubs/list', 'clubs/detail', 'posts/list', 'posts/detail', 'posts/comments/list', 'topics/list', 'topics/detail', 'boards/list', 'boards/detail', 'collections/list', 'collections/detail', 'search/query', 'search/suggestions', 'profile/get']);
-const STATIC_FILES = new Set(['index.html', 'styles.css', 'api.mjs', 'core.mjs', 'views.mjs', 'flows.mjs', 'app.mjs', 'favicon.svg']);
+const STATIC_FILES = new Set(['index.html', 'styles.css', 'api.mjs', 'core.mjs', 'views.mjs', 'flows.mjs', 'app.mjs', 'favicon.svg', 'editor.html', 'editor.css', 'editor.mjs', 'editor.bundle.mjs', 'rich-doc.mjs']);
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: http: blob: data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 function requestAddress(req, trustedProxies = (process.env.WEB_TRUSTED_PROXY_IPS || '').split(',').map((value) => value.trim()).filter(Boolean)) {
@@ -38,7 +38,7 @@ async function readBody(req, maxBytes = 4 * 1024 * 1024) {
     return value;
   } catch (_) { throw new WebAuthError(400, 'invalid_input', '请求内容不合法'); }
 }
-function createWebHttp({ auth, actionHandler }) {
+function createWebHttp({ auth, actionHandler, mediaSessionResolver = (req) => auth.resolveSession(req) }) {
   return async function handle(req, res, pathname, requestId) {
     const staticRequest = pathname === '/' || pathname === '/web' || pathname === '/web/' || pathname.startsWith('/web/');
     if (!staticRequest && !pathname.startsWith('/v1/web/')) return false;
@@ -57,9 +57,19 @@ function createWebHttp({ auth, actionHandler }) {
         let content;
         try { content = await fs.readFile(path.join(__dirname, '../web', filename)); }
         catch (error) { if (error.code === 'ENOENT') throw new WebAuthError(404, 'not_accessible', '页面不存在'); throw error; }
-        const type = { '.html': 'text/html', '.css': 'text/css', '.mjs': 'text/javascript', '.svg': 'image/svg+xml' }[path.extname(filename)];
+        const type = { '.html': 'text/html', '.css': 'text/css', '.mjs': 'text/javascript', '.js': 'text/javascript', '.svg': 'image/svg+xml' }[path.extname(filename)];
         res.writeHead(200, { 'content-type': `${type}; charset=utf-8`, 'content-length': content.length });
         res.end(req.method === 'HEAD' ? undefined : content);
+        return true;
+      }
+      if (pathname.startsWith('/v1/web/media/') && ['GET', 'HEAD'].includes(req.method)) {
+        const session = await mediaSessionResolver(req);
+        if (req.headers.origin) auth.assertOrigin(req.headers.origin);
+        const query = new URL(req.url, 'http://localhost').searchParams;
+        const media = await require('./media').getWebMedia({ assetId: decodeURIComponent(pathname.slice('/v1/web/media/'.length)), clubId: query.get('clubId'), draftId: query.get('draftId'), postId: query.get('postId'), version: query.get('version'), identity: session?.identity || null });
+        if (!media) throw new WebAuthError(404, 'not_accessible', '图片不可访问');
+        res.writeHead(200, { 'content-type': media.contentType, 'content-length': media.content.length, 'cache-control': 'private, no-store' });
+        res.end(req.method === 'HEAD' ? undefined : media.content);
         return true;
       }
       if (pathname === '/v1/web/session' && req.method === 'GET') {
@@ -87,9 +97,8 @@ function createWebHttp({ auth, actionHandler }) {
         if (typeof body.action !== 'string' || !body.action || (body.clubId !== undefined && (typeof body.clubId !== 'string' || body.clubId.length > 64)) || (body.payload !== undefined && (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)))) throw new WebAuthError(400, 'invalid_input', '请求内容不合法');
         if (!session && !PUBLIC_READS.has(body.action)) throw new WebAuthError(401, 'unauthenticated', '请先登录');
         if (body.action.startsWith('account/web-login/')) throw new WebAuthError(400, 'invalid_input', '请使用网站账号登录');
-        if (process.env.REVIEW_PROVIDER === 'manual' && body.action.startsWith('assets/')) throw new WebAuthError(403, 'feature_disabled', '图片上传尚未开放');
         const result = await actionHandler({ action: body.action, clubId: body.clubId, payload: body.payload || {} }, { requestId, webIdentity: session ? session.identity : { openid: null, invalid: false } });
-        if (result.code === 0 && body.action === 'session/me' && result.data && process.env.REVIEW_PROVIDER === 'manual') result.data.capabilities = { ...result.data.capabilities, uploads: false, video: false };
+        if (result.code === 0 && body.action === 'session/me' && result.data && process.env.REVIEW_PROVIDER === 'manual') result.data.capabilities = { ...result.data.capabilities, richUploads: !!result.data.capabilities.uploads, uploads: false, video: false };
         send(res, result.code === 0 ? 200 : HTTP_BY_KIND[result.code] || 500, result);
         return true;
       }

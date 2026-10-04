@@ -8,6 +8,7 @@ const { COLLECTIONS, DEFAULT_CLUB_ID } = require('./constants');
 
 const RPC_NAMES = new Set([
   'hg_platform_clubs',
+  'hg_article_draft',
   'hg_store',
   'hg_create_post',
   'hg_resubmit_rejected_post',
@@ -39,6 +40,7 @@ const RPC_NAMES = new Set([
   'hg_usage_reserve_review_call',
   'hg_finish_review',
   'hg_cleanup_asset',
+  'hg_orphan_asset_candidates',
 ]);
 
 const allowed = new Set(Object.values(COLLECTIONS));

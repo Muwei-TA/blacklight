@@ -83,6 +83,7 @@ function createRouter(handlers, { name = 'api', identityResolver = null } = {}) 
         : await resolveContext(identity.openid || null, event.clubId === undefined ? DEFAULT_CLUB_ID : event.clubId);
       ctx.requestedClubId = event.clubId === undefined ? null : event.clubId;
       ctx.identityDiagnostic = identity.diagnostic || { source: 'nas-session', hasOpenid: !!identity.openid };
+      ctx.channel = identity.channel === 'web' ? 'web' : 'client';
       ctx.requestId = requestId;
       ctx.action = action;
       ctx.now = Date.now();
