@@ -24,6 +24,20 @@ test('reading privacy preserves the registration form and authentication continu
   assert.match(html, /href="#\/login\?next=%23%2Fjoin"/);
 });
 
+test('registration collects and verifies an invitation before one-step club entry', () => {
+  const html = renderPage({ account: { authenticated: false }, route: { name: 'register', query: {} } });
+  assert.match(html, /name="inviteCode"/);
+  assert.match(html, /data-action="preview-invite"/);
+  assert.match(html, /name="rulesVersion"/);
+  assert.match(html, /注册并加入社团/);
+  assert.doesNotMatch(html, /注册后使用管理员提供的邀请码加入社团/);
+});
+
+test('authenticated personal page exposes logout without entering settings', () => {
+  const html = renderPage({ ...member, route: { name: 'me', query: {} }, page: {} });
+  assert.match(html, /data-action="logout"/);
+});
+
 test('post opened from bookmarks returns to bookmarks, while invalid return paths fall back to home', () => {
   const detail = { post: { id: 'post-a', status: 'published', body: '正文', viewer: {} }, comments: { items: [] } };
   const html = renderPage({ ...member, route: { name: 'post', id: 'post-a', query: { back: '#/contents/bookmark' } }, page: detail });

@@ -67,14 +67,22 @@ export function createFlows({ state, api, navigate, refreshAccount, loadRoute, s
       if (['register', 'password'].includes(name) && values.password !== values.confirmPassword) throw new Error('两次输入的密码不一致');
       if (['login', 'register'].includes(name)) {
         const continuation = parseInternalRoute(state.route.query?.next);
-        await api.auth(name, values);
+        if (name === 'register' && (form.dataset.verifiedInvite !== String(values.inviteCode || '').trim().toUpperCase() || !values.rulesVersion)) {
+          throw new Error('请先核对邀请码及对应的社团约定');
+        }
+        const result = await api.auth(name, name === 'register' ? { ...values, agreement: values.agreement === 'on' } : values);
+        if (name === 'register') {
+          state.clubId = result.clubId;
+          try { localStorage.setItem('blacklight.selectedClub', result.clubId); } catch { /* storage may be disabled */ }
+        }
         form.reset();
         const refreshed = await refreshAccount();
         if (isCurrent(token)) {
           if (refreshed?.invalidSelectedClub) navigate('clubs');
+          else if (name === 'register') navigate('home');
           else if (continuation) navigate(continuation.name, continuation.id, continuation.query);
           else navigate(state.clubId ? 'home' : 'clubs');
-          toast(name === 'register' ? '账号已创建，欢迎来到灯下' : '欢迎回到灯下');
+          toast(name === 'register' ? '注册成功，已加入对应社团' : '欢迎回到灯下');
         }
         return;
       }
@@ -146,6 +154,18 @@ export function createFlows({ state, api, navigate, refreshAccount, loadRoute, s
     }
     button.disabled = true;
     try {
+      if (command === 'preview-invite') {
+        const form = button.closest('form[data-form="register"]');
+        const code = form?.elements.inviteCode.value.trim().toUpperCase();
+        if (!form || !code) throw new Error('请先输入邀请码');
+        form.elements.rulesVersion.value = '';
+        form.dataset.verifiedInvite = '';
+        const preview = await api.auth('invite-preview', { inviteCode: code });
+        form.elements.rulesVersion.value = preview.rulesVersion;
+        form.dataset.verifiedInvite = code;
+        form.querySelector('[data-invite-preview]').textContent = `${preview.name}\n${preview.description || ''}\n社团约定：${preview.rules}\n规则版本 ${preview.rulesVersion}`;
+        return;
+      }
       if (command === 'reaction' || command === 'bookmark') {
         await action(`posts/${command}`, { id: post.id, next: !post.viewer[command === 'reaction' ? 'reacted' : 'bookmarked'] });
       } else if (command === 'comment-reaction') {

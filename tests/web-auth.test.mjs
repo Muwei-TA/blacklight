@@ -22,6 +22,13 @@ test('username normalization prevents casing ambiguity and prototype-shaped acco
   }
 });
 
+test('registration invitation codes are normalized and malformed codes are rejected before lookup', () => {
+  assert.equal(auth.normalizeInviteCode(' ab12cd34 '), 'AB12CD34');
+  for (const value of ['', 'not-a-code', 'x'.repeat(65), {}, null]) {
+    assert.throws(() => auth.normalizeInviteCode(value), /邀请码/);
+  }
+});
+
 test('production cookies are host scoped and browser identity is never stored in localStorage', () => {
   const cookie = auth.buildCookie('a'.repeat(43), { secure: true });
   assert.match(cookie, /^__Host-blacklight_web=/);

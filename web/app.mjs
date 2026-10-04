@@ -234,7 +234,15 @@ root.addEventListener('change', (event) => {
     form.elements.body.maxLength = event.target.value === 'article' ? 20000 : 2000;
   }
 });
-root.addEventListener('input', (event) => { if (event.target.closest('form[data-form="write"],form[data-form="resubmit"]')) dirty = true; });
+root.addEventListener('input', (event) => {
+  if (event.target.closest('form[data-form="write"],form[data-form="resubmit"]')) dirty = true;
+  if (event.target.name === 'inviteCode' && event.target.closest('form[data-form="register"]')) {
+    const form = event.target.form;
+    form.dataset.verifiedInvite = '';
+    form.elements.rulesVersion.value = '';
+    form.querySelector('[data-invite-preview]').textContent = '邀请码已更改，请重新核对对应社团及其约定。';
+  }
+});
 window.addEventListener('beforeunload', (event) => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
 window.addEventListener('hashchange', () => {
   const current = routeUrl(state.route.name, state.route.id, state.route.query);

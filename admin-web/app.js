@@ -45,7 +45,7 @@
   const PAGE_COPY = {
     overview: ['社团治理概览', '查看当前社团待处理的入社与恢复事项，并沿用现有统一审核队列。'],
     members: ['成员名册', '按成员状态查找记录，逐项处理成员资格并记录理由。'],
-    invites: ['邀请码生命周期', '创建公开申请码或绑定账号的定向邀请，查看次数、预留和撤销状态。'],
+    invites: ['邀请码生命周期', '公开码供新用户注册后直接入社；已有账号兑换仍进入审核。定向邀请只绑定已有账号。'],
     settings: ['社团规则设置', '编辑社团简介、章程和是否接收新的邀请码兑换。'],
     team: ['管理团队与换届', '查看本届管理团队，发起完整的新届提案并跟踪双方确认。'],
     audit: ['社团操作审计', '查看当前社团脱敏的成员、邀请、规则和交接事件。'],
@@ -350,7 +350,7 @@
       <td>${h(dateText(invite.expiresAt))}</td>
       <td>${invite.status === 'active' ? `<button class="button button--small button--danger" data-invite-revoke="${h(invite.inviteId)}">撤销</button>` : '—'}</td></tr>`).join('');
     return `<div class="columns"><section class="panel">
-      <div class="panel-head"><div><h2>创建邀请码</h2><p class="panel-note">每个兑换仍需邀请码。公开码进入人工审核；定向码只绑定一个已有账号。</p></div></div>
+      <div class="panel-head"><div><h2>创建邀请码</h2><p class="panel-note">新用户用公开码注册会直接入社；已有账号使用公开码仍进入人工审核。定向码只绑定一个已有账号。</p></div></div>
       ${code}
       <form data-form="invite-create">
         <div class="field"><label for="invite-mode">邀请码用途</label><select id="invite-mode" name="mode" data-invite-mode><option value="application">公开申请</option><option value="direct">定向直邀</option></select></div>

@@ -1179,6 +1179,31 @@ small {
   max-width: 500px;
   padding: 35px 38px;
 }
+.invite-register {
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fafafb;
+}
+.invite-register > .button { margin-top: 8px; }
+.invite-preview {
+  margin-top: 12px;
+  color: #666873;
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre-line;
+}
+.account-signout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 20px;
+}
+.account-signout h3 { margin: 0 0 6px; }
+.account-signout p { margin: 0; }
 .auth-tabs {
   display: flex;
   gap: 25px;

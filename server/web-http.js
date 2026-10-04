@@ -84,11 +84,16 @@ function createWebHttp({ auth, actionHandler, mediaSessionResolver = (req) => au
       if (req.method !== 'POST') throw new WebAuthError(405, 'invalid_input', '请求方法不支持');
       auth.assertOrigin(req.headers.origin);
       const body = await readBody(req, pathname === '/v1/web/action' ? undefined : 16 * 1024);
+      if (pathname === '/v1/web/auth/invite-preview') {
+        const preview = await auth.previewInvite({ ...body, origin: req.headers.origin, remoteAddress: requestAddress(req) });
+        send(res, 200, { code: 0, data: preview });
+        return true;
+      }
       if (['/v1/web/auth/login', '/v1/web/auth/register'].includes(pathname)) {
         const operation = pathname.endsWith('/login') ? 'login' : 'register';
         const session = await auth[operation]({ ...body, origin: req.headers.origin, remoteAddress: requestAddress(req) });
         res.setHeader('set-cookie', buildCookie(session.sessionToken, { secure: auth.secureCookie() }));
-        send(res, 200, { code: 0, data: { csrfToken: session.csrfToken, expiresAt: session.expiresAt } });
+        send(res, 200, { code: 0, data: { csrfToken: session.csrfToken, expiresAt: session.expiresAt, ...(session.clubId ? { clubId: session.clubId } : {}) } });
         return true;
       }
       const session = await auth.resolveSession(req);

@@ -129,6 +129,21 @@ async function query(text, values = []) {
   return getPool().query(text, values);
 }
 
+async function withTransaction(work) {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function ping() {
   await getPool().query('SELECT 1');
   return true;
@@ -141,4 +156,4 @@ async function close() {
   await active.end();
 }
 
-module.exports = { collection, command, serverDate, RegExp: RegExpFilter, rpc, query, ping, close };
+module.exports = { collection, command, serverDate, RegExp: RegExpFilter, rpc, query, withTransaction, ping, close };

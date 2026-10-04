@@ -16,6 +16,12 @@ function normalizeUsername(value) {
   if (!/^[a-z0-9][a-z0-9_]{2,31}$/.test(normalized)) throw new WebAuthError(400, 'invalid_input', '账号须为 3–32 位字母、数字或下划线');
   return normalized;
 }
+function normalizeInviteCode(value) {
+  if (typeof value !== 'string') throw new WebAuthError(400, 'invalid_invite', '邀请码无效或已过期');
+  const code = value.trim().toUpperCase();
+  if (!/^[A-F0-9]{8,64}$/.test(code)) throw new WebAuthError(400, 'invalid_invite', '邀请码无效或已过期');
+  return code;
+}
 function validatePassword(value) {
   if (typeof value !== 'string' || value.length < 10 || value.length > 128) throw new WebAuthError(400, 'invalid_input', '密码须为 10–128 个字符');
 }
@@ -93,16 +99,93 @@ function createWebAuth({ database = pg, origin = process.env.PUBLIC_API_BASE_URL
     if (!result.rowCount) throw new WebAuthError(401, 'unauthenticated', '账号状态已变化，请重新登录');
     return { sessionToken: token, csrfToken: csrfFor(token), expiresAt: result.rows[0].expires_at };
   }
-  async function register({ username, password, displayName, origin: requestOrigin, remoteAddress }) {
+  async function previewInvite({ inviteCode, origin: requestOrigin, remoteAddress }) {
+    assertOrigin(requestOrigin);
+    const code = normalizeInviteCode(inviteCode);
+    const codeHash = digest(code);
+    await rateLimit('invite-preview', codeHash, remoteAddress);
+    const result = await database.query(`
+      SELECT c.id, c.doc FROM public.hg_invite_codes i
+        JOIN public.hg_club_config c ON c.id = i.doc->>'clubId'
+      WHERE i.doc->>'codeHash' = $1 AND i.doc->>'mode' = 'application'
+        AND COALESCE(i.doc->>'targetUserId','') = ''
+        AND public.hg_admin_invite_status(i.doc) = 'active'
+        AND i.doc->>'rulesVersion' = COALESCE(NULLIF(c.doc->>'rulesVersion',''),'v1.0')
+        AND COALESCE(c.doc->>'status','active') = 'active'
+        AND COALESCE(c.doc->>'admissionMode','invite_required') <> 'closed'`, [codeHash]);
+    if (result.rowCount !== 1) throw new WebAuthError(400, 'invalid_invite', '邀请码无效或已过期');
+    const { id, doc } = result.rows[0];
+    return { clubId: id, name: doc.name || id, description: doc.description || doc.intro || '',
+      rules: doc.rules || doc.charter || '尊重彼此的表达，不泄露他人隐私。',
+      rulesVersion: doc.rulesVersion || 'v1.0' };
+  }
+  async function register({ username, password, displayName, inviteCode, rulesVersion, agreement, origin: requestOrigin, remoteAddress }) {
     assertOrigin(requestOrigin);
     if (process.env.WEB_REGISTRATION === 'closed') throw new WebAuthError(403, 'registration_closed', '注册暂未开放，请联系社团管理员');
     const name = normalizeUsername(username);
     validatePassword(password);
     if (typeof displayName !== 'string' || !displayName.trim() || displayName.length > 20) throw new WebAuthError(400, 'invalid_input', '昵称须为 1–20 个字符');
+    const code = inviteCode === undefined ? null : normalizeInviteCode(inviteCode);
+    if (code && (agreement !== true || typeof rulesVersion !== 'string' || !rulesVersion || rulesVersion.length > 20)) {
+      throw new WebAuthError(400, 'invalid_input', '请先阅读并同意社团约定');
+    }
     await rateLimit('register', name, remoteAddress);
     const passwordHash = await hashPassword(password);
     const userId = crypto.randomUUID();
     const identityRef = `web:${crypto.randomUUID()}`;
+    if (code) {
+      if (typeof database.withTransaction !== 'function') throw new Error('invited registration requires transaction support');
+      const codeHash = digest(code);
+      const token = crypto.randomBytes(32).toString('base64url');
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      try {
+        const clubId = await database.withTransaction(async (client) => {
+          // Read the club id before locking, then recheck the invite after taking
+          // the same club lock used by normal admission and invite revocation.
+          const candidate = await client.query("SELECT id, doc->>'clubId' AS club_id FROM public.hg_invite_codes WHERE doc->>'codeHash'=$1", [codeHash]);
+          if (candidate.rowCount !== 1 || !candidate.rows[0].club_id) throw new WebAuthError(400, 'invalid_invite', '邀请码无效或已过期');
+          const targetClub = candidate.rows[0].club_id;
+          await client.query("SELECT pg_advisory_xact_lock(hashtextextended('hg-governance:'||$1::text||':members',0))", [targetClub]);
+          const clubResult = await client.query('SELECT doc FROM public.hg_club_config WHERE id=$1 FOR SHARE', [targetClub]);
+          const inviteResult = await client.query(`SELECT doc, public.hg_admin_invite_status(doc) AS status
+            FROM public.hg_invite_codes WHERE id=$1 AND doc->>'codeHash'=$2 FOR UPDATE`, [candidate.rows[0].id, codeHash]);
+          const club = clubResult.rows[0]?.doc;
+          const invite = inviteResult.rows[0]?.doc;
+          const currentRules = club?.rulesVersion || 'v1.0';
+          if (!club || (club.status || 'active') !== 'active' || club.admissionMode === 'closed'
+            || !invite || inviteResult.rows[0].status !== 'active' || invite.clubId !== targetClub
+            || invite.mode !== 'application' || invite.targetUserId
+            || invite.rulesVersion !== currentRules) throw new WebAuthError(400, 'invalid_invite', '邀请码无效或已过期');
+          if (rulesVersion !== currentRules) throw new WebAuthError(409, 'rules_changed', '社团约定已更新，请重新核对邀请码');
+          const stamp = new Date().toISOString();
+          const userDoc = { _id: userId, wxOpenIdRef: identityRef, displayName: displayName.trim(), status: 'active', avatar: '', createdAt: stamp, updatedAt: stamp };
+          const applicationId = `application:${crypto.randomUUID()}`;
+          const membershipId = `${userId}:${targetClub}`;
+          await client.query('INSERT INTO public.hg_users(id,doc) VALUES($1,$2::jsonb)', [userId, JSON.stringify(userDoc)]);
+          await client.query('INSERT INTO public.hg_web_accounts(username,user_id,password_hash) VALUES($1,$2,$3)', [name, userId, passwordHash]);
+          await client.query('INSERT INTO public.hg_membership_applications(id,doc) VALUES($1,$2::jsonb)', [applicationId, JSON.stringify({
+            _id: applicationId, userId, clubId: targetClub, displayName: displayName.trim(),
+            inviteId: candidate.rows[0].id, inviteVersion: Number(invite.version) || 1,
+            rulesVersion: currentRules, status: 'active', admissionMethod: 'invite',
+            reservationStatus: 'consumed', idempotencyKey: crypto.randomUUID(),
+            version: 1, createdAt: stamp, updatedAt: stamp, decidedAt: stamp,
+          })]);
+          await client.query('INSERT INTO public.hg_memberships(id,doc) VALUES($1,$2::jsonb)', [membershipId, JSON.stringify({
+            _id: membershipId, userId, clubId: targetClub, status: 'active', role: 'member',
+            applicationId, rulesVersion: currentRules, version: 1, joinedAt: stamp, updatedAt: stamp,
+          })]);
+          await client.query('UPDATE public.hg_invite_codes SET doc=doc||jsonb_build_object(\'usedCount\',$2::integer,\'updatedAt\',$3::text) WHERE id=$1',
+            [candidate.rows[0].id, (Number(invite.usedCount) || 0) + 1, stamp]);
+          await client.query(`INSERT INTO public.hg_web_sessions(token_hash,user_id,credential_version,origin,expires_at)
+            VALUES($1,$2,1,$3,$4)`, [digest(token), userId, configuredOrigin(), expiresAt]);
+          return targetClub;
+        });
+        return { sessionToken: token, csrfToken: csrfFor(token), expiresAt, clubId };
+      } catch (error) {
+        if (error.code === '23505') throw new WebAuthError(409, 'account_exists', '该账号无法注册，请更换账号或登录');
+        throw error;
+      }
+    }
     try {
       // Conflict aborts both inserts. No orphan user on racing registration.
       await database.query(`
@@ -183,6 +266,6 @@ function createWebAuth({ database = pg, origin = process.env.PUBLIC_API_BASE_URL
     if (!result.rowCount) throw new WebAuthError(400, 'invalid_account', '用户不存在、已停用，或已有不同的网站账号');
     return { configured: true };
   }
-  return { register, login, resolveSession, revokeSession, changePassword, provisionAccount, assertOrigin, secureCookie };
+  return { register, previewInvite, login, resolveSession, revokeSession, changePassword, provisionAccount, assertOrigin, secureCookie };
 }
-module.exports = { WebAuthError, createWebAuth, hashPassword, verifyPassword, normalizeUsername, buildCookie, cookieName, readCookie, csrfFor, validCsrf, sameOrigin, digest };
+module.exports = { WebAuthError, createWebAuth, hashPassword, verifyPassword, normalizeUsername, normalizeInviteCode, buildCookie, cookieName, readCookie, csrfFor, validCsrf, sameOrigin, digest };
