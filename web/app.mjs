@@ -20,7 +20,7 @@ function parseRoute() {
 }
 function render() {
   root.innerHTML = shell(state);
-  document.title = `${state.session?.club?.name || '黑光'} · 树洞`;
+  document.title = state.session?.club?.name ? `${state.session.club.name} · 树洞` : '社团树洞';
   if (['write', 'resubmit'].includes(state.route.name) && !state.loading && !state.error) {
     const form = root.querySelector('form');
     if (state.route.name === 'resubmit' && form?.elements.body) form.elements.body.value = state.page?.post?.body || '';

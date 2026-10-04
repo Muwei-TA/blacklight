@@ -149,7 +149,7 @@
     </div>`;
     root.innerHTML = `<main class="main" style="margin-left:0;min-height:100vh">
       <section class="login-stage">
-        <aside class="login-aside"><div class="brand-mark">HEIGUANG · GOVERNANCE</div><div><h1>把治理工作<br />交还给团队</h1><p>社团设置、成员资格和届次交接，在清晰的角色范围内完成。</p></div><div class="brand-sub">黑光树洞 · 多社团治理</div></aside>
+        <aside class="login-aside"><div class="brand-mark">COMMUNITY · GOVERNANCE</div><div><h1>把治理工作<br />交还给团队</h1><p>社团设置、成员资格和届次交接，在清晰的角色范围内完成。</p></div><div class="brand-sub">社团树洞 · 多社团治理</div></aside>
         <div class="login-main"><div class="eyebrow">网站账号 / 小程序确认</div><h2>社团治理工作台</h2><p><a class="button button--primary" href="/#/login">使用网站账号登录</a> <a class="button" href="/#/me">返回成员网站</a></p><p>网站管理员登录后，从「我的」进入工作台；原有小程序二维码登录仍可使用。</p><p>使用小程序扫码并确认登录；仅显示当前账号有权管理的社团。换届或权限变化后需重新登录。请核对确认页中的访问地址。</p>${qr}<div class="footer-note">如果访问地址或账号与你预期不符，请在小程序中拒绝。</div></div>
       </section>
     </main>`;
@@ -182,13 +182,13 @@
     const loading = state.loadingView ? `<div class="loading">正在读取当前范围的数据…</div>` : '';
     root.innerHTML = `<div class="shell">
       <aside class="rail">
-        <div class="brand"><div class="brand-mark">HEIGUANG · GOVERNANCE</div><div class="brand-name">黑光 · 社团治理</div><div class="brand-sub">按角色处理每一项工作</div></div>
+        <div class="brand"><div class="brand-mark">COMMUNITY · GOVERNANCE</div><div class="brand-name">社团树洞</div><div class="brand-sub">按角色处理每一项工作</div></div>
         <nav class="nav" aria-label="管理工作区">${views.map((view) => `<button data-view="${h(view.id)}" aria-current="${state.view === view.id ? 'page' : 'false'}"><span class="nav-index">${h(view.eyebrow)}</span><span>${h(view.label)}</span></button>`).join('')}</nav>
         <div class="rail-bottom"><div class="rail-user">${h(person.displayName || person.id || '已登录账号')}</div><div class="rail-role">${h(currentRoleText())}</div><button class="logout" data-action="logout">退出管理台</button></div>
       </aside>
       <main class="main">
         ${banner}${viewError}
-        <header class="topline"><div class="topline-copy"><div class="eyebrow">${h(state.view.toUpperCase())} / BLACKLIGHT</div><h1>${h(copy[0])}</h1><p class="lede">${h(copy[1])}</p></div>${renderClubControl()}</header>
+        <header class="topline"><div class="topline-copy"><div class="eyebrow">${h(state.view.toUpperCase())} / COMMUNITY</div><h1>${h(copy[0])}</h1><p class="lede">${h(copy[1])}</p></div>${renderClubControl()}</header>
         ${loading}<section class="content">${body}</section>
       </main>
     </div>`;
