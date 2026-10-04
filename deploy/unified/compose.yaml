@@ -1,0 +1,70 @@
+name: blacklight-unified-web
+
+services:
+  web-api:
+    build:
+      context: ../..
+      dockerfile: deploy/nas/Dockerfile.app
+    image: ${UNIFIED_WEB_IMAGE:?Set an immutable unified web API image tag}
+    restart: unless-stopped
+    init: true
+    command: ["npm", "start"]
+    environment:
+      NODE_ENV: production
+      RUNTIME_KIND: nas
+      NAS_LAN_MODE: "0"
+      REVIEW_PROVIDER: manual
+      DATABASE_URL_FILE: /run/secrets/database_url
+      MEDIA_URL_SECRET_FILE: /run/secrets/media_url_secret
+      ANON_ALIAS_SECRET_FILE: /run/secrets/anon_alias_secret
+      PUBLIC_API_BASE_URL: ${WEB_PUBLIC_ORIGIN:?Set the exact public HTTPS website origin}
+      WEB_TRUSTED_PROXY_IPS: ${WEB_TRUSTED_PROXY_IPS:?Set the exact trusted reverse proxy IP}
+      WEB_REGISTRATION: ${WEB_REGISTRATION:-open}
+      NAS_MEDIA_DIR: /data/private-media
+      PORT: "3000"
+    secrets:
+      - source: database_url
+        target: database_url
+      - source: media_url_secret
+        target: media_url_secret
+      - source: anon_alias_secret
+        target: anon_alias_secret
+    volumes:
+      - type: bind
+        source: "${NAS_DATA_ROOT:?Set NAS_DATA_ROOT to the existing stage data root}/media"
+        target: /data/private-media
+    ports:
+      - "${WEB_BIND_IP:-127.0.0.1}:${WEB_API_PORT:-18120}:3000"
+    networks:
+      - web_edge
+      - stage_private
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/v1/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    stop_grace_period: 30s
+
+networks:
+  stage_private:
+    external: true
+    name: "${NAS_PRIVATE_NETWORK:?Set NAS_PRIVATE_NETWORK to the existing stage private network}"
+  web_edge:
+    external: true
+    name: ${WEB_EDGE_NETWORK:?Set WEB_EDGE_NETWORK to the existing website edge network}
+
+secrets:
+  database_url:
+    file: "${NAS_DATA_ROOT:?Set NAS_DATA_ROOT to the existing stage data root}/secrets/database_url"
+  media_url_secret:
+    file: "${NAS_DATA_ROOT:?Set NAS_DATA_ROOT to the existing stage data root}/secrets/media_url_secret"
+  anon_alias_secret:
+    file: "${NAS_DATA_ROOT:?Set NAS_DATA_ROOT to the existing stage data root}/secrets/anon_alias_secret"

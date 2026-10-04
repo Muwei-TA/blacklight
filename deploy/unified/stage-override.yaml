@@ -1,0 +1,7 @@
+services:
+  api:
+    environment:
+      REVIEW_PROVIDER: wechat
+  worker:
+    environment:
+      REVIEW_PROVIDER: wechat
