@@ -28,10 +28,13 @@ function loadSecretFiles(names = SECRET_NAMES) {
 
 function validateConfig() {
   loadSecretFiles();
-  for (const name of SECRET_NAMES) {
+  const requiredSecrets = process.env.REVIEW_PROVIDER === 'manual'
+    ? SECRET_NAMES.filter((name) => name !== 'MINIPROGRAM_APP_SECRET') : SECRET_NAMES;
+  for (const name of requiredSecrets) {
     if (!process.env[name]) throw new Error(`${name} is required`);
   }
-  if (!process.env.MINIPROGRAM_APP_ID) throw new Error('MINIPROGRAM_APP_ID is required');
+  if (process.env.REVIEW_PROVIDER && !['manual', 'wechat'].includes(process.env.REVIEW_PROVIDER)) throw new Error('REVIEW_PROVIDER must be manual or wechat');
+  if (process.env.REVIEW_PROVIDER !== 'manual' && !process.env.MINIPROGRAM_APP_ID) throw new Error('MINIPROGRAM_APP_ID is required');
   if (!process.env.PUBLIC_API_BASE_URL) throw new Error('PUBLIC_API_BASE_URL is required');
   if (Buffer.byteLength(process.env.MEDIA_URL_SECRET) < 32) throw new Error('MEDIA_URL_SECRET must contain at least 32 bytes');
   const lanMode = process.env.NAS_LAN_MODE || '0';
@@ -43,6 +46,8 @@ function validateConfig() {
       || (process.env.API_BIND_IP && process.env.API_BIND_IP !== '192.168.50.28')) {
       throw new Error('NAS LAN mode requires the fixed 192.168.50.28 LAN URL and matching port');
     }
+  } else if (publicUrl.protocol === 'http:' && ['development', 'test'].includes(process.env.NODE_ENV) && ['localhost', '127.0.0.1', '[::1]'].includes(publicUrl.hostname)) {
+    // Explicit loopback-only local preview; never enabled in production.
   } else if (publicUrl.protocol !== 'https:') {
     throw new Error('PUBLIC_API_BASE_URL must use HTTPS outside NAS LAN mode');
   }

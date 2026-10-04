@@ -139,7 +139,7 @@ async function runExport(t, mode = 'success') {
 test('CLI exporter produces a private snapshot accepted by verify-only', async (t) => {
   const { snapshot, env, result } = await runExport(t);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /snapshot complete: tables=33, rows=3, media=1/);
+  assert.match(result.stdout, /snapshot complete: tables=36, rows=3, media=1/);
   for (const secret of ['SYNTHETIC_KEY_MUST_NOT_BE_PASSED', PERSONAL_MARKER, SIGNED_URL_MARKER]) {
     assert.equal(`${result.stdout}${result.stderr}`.includes(secret), false);
   }
@@ -163,7 +163,7 @@ test('CLI exporter produces a private snapshot accepted by verify-only', async (
 
   const verified = runNode(IMPORT_SCRIPT, ['--writes-paused', '--snapshot', snapshot, '--verify-only'], env);
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /snapshot verified: tables=33, rows=3, media=1/);
+  assert.match(verified.stdout, /snapshot verified: tables=36, rows=3, media=1/);
 });
 
 for (const [mode, expectedCode] of [

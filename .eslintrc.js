@@ -16,6 +16,11 @@ module.exports = {
   },
   overrides: [
     {
+      files: ['web/**/*.mjs'],
+      env: { browser: true },
+      parserOptions: { sourceType: 'module' },
+    },
+    {
       // 脚本与测试使用 ESM
       files: ['scripts/**/*.mjs', 'tests/**/*.mjs'],
       parserOptions: { sourceType: 'module' },

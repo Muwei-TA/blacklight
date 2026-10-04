@@ -6,17 +6,21 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    npm ci --omit=dev --strict-ssl=true
 
 COPY shared/ ./shared/
 COPY server/ ./server/
 COPY cloudfunctions/api/ ./cloudfunctions/api/
 COPY cloudfunctions/worker/ ./cloudfunctions/worker/
 COPY admin-web/ ./admin-web/
+COPY web/ ./web/
 COPY scripts/sync-shared.mjs ./scripts/sync-shared.mjs
 COPY scripts/local-media-manifest.mjs scripts/local-media-receiver.mjs ./scripts/
-COPY scripts/local-platform-role.mjs ./scripts/
+COPY scripts/local-platform-role.mjs scripts/local-web-account.mjs ./scripts/
 RUN node scripts/sync-shared.mjs \
+    && chmod -R a+rX /app \
     && mkdir -p /data/private-media \
     && chown node:node /data/private-media
 

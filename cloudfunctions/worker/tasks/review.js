@@ -24,6 +24,9 @@ const wechat = require('../shared/wechat-api');
  */
 async function checkText(content, openid, clubId) {
   if (!clubId) throw new Error('review task club is required');
+  if (process.env.REVIEW_PROVIDER === 'manual' || String(openid || '').startsWith('web:')) {
+    return { pass: false, suspect: true, label: 'manual-review' };
+  }
   if (!content || !content.trim()) return { pass: true, suspect: false };
   // Every character must be reviewed. Long articles cannot silently bypass
   // review after the first 2500 characters. Overlap preserves boundary context.

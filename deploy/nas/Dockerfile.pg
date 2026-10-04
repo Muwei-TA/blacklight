@@ -6,4 +6,5 @@ COPY scripts/local-apply-migrations.sh /usr/local/bin/local-apply-migrations
 COPY scripts/local-backup.sh /usr/local/bin/local-backup
 COPY deploy/nas/entrypoint-pg-init.sh /docker-entrypoint-initdb.d/010-blacklight-init.sh
 COPY deploy/nas/healthcheck-pg.sh /usr/local/bin/healthcheck-pg
-RUN chmod 0755 /usr/local/bin/local-apply-migrations /usr/local/bin/local-backup /docker-entrypoint-initdb.d/010-blacklight-init.sh /usr/local/bin/healthcheck-pg
+RUN chmod -R a+rX /opt/blacklight \
+    && chmod 0755 /usr/local/bin/local-apply-migrations /usr/local/bin/local-backup /docker-entrypoint-initdb.d/010-blacklight-init.sh /usr/local/bin/healthcheck-pg
